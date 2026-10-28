@@ -73,6 +73,25 @@ h1 { font-size: clamp(1.8rem, 7vw, 2.5rem); line-height: 1.08; letter-spacing: -
 #sent li { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: .6rem; }
 #sent .st.ok { color: var(--ok); font-weight: 600; } #sent .st.bad { color: var(--bad); font-weight: 600; }
 
+a.btn { display: inline-block; text-decoration: none; }
+.sec { margin: 0 0 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); font-size: .9rem; }
+.sec summary { cursor: pointer; padding: .6rem .8rem; display: flex; align-items: center; gap: .5rem; font-weight: 600; list-style: none; }
+.sec summary::-webkit-details-marker { display: none; }
+.sec summary::after { content: "Details"; margin-left: auto; font-weight: 400; font-size: .8rem; color: var(--muted); }
+.sec ul { list-style: none; margin: 0; padding: 0 .8rem .7rem; display: grid; gap: .4rem; }
+.sec li { display: grid; grid-template-columns: 1.3rem 1fr; }
+.sec li .m { font-weight: 700; }
+.sec li.ok .m { color: var(--ok); } .sec li.bad .m { color: var(--bad); }
+.sec li small { display: block; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+.sec li.route { grid-template-columns: 1fr; color: var(--muted); font-size: .82rem; }
+.file-name { font-weight: 600; overflow-wrap: anywhere; }
+.file-meta { color: var(--muted); font-size: .85rem; margin: .1rem 0 .6rem; }
+.meter { height: .4rem; border-radius: 99px; background: var(--line); overflow: hidden; margin: 0 0 .7rem; }
+.meter > i { display: block; height: 100%; width: 0; background: var(--accent); }
+.hint { margin: .2rem 0 0; font-size: .85rem; color: var(--muted); }
+#sent li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+body.dragging main { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
 footer { margin-top: 2.4rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
 footer p { margin: 0 0 .6rem; max-width: 32rem; }
 footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
@@ -91,6 +110,11 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
     <h1 id="headline">Starting…</h1>
     <p id="sub" class="sub"></p>
     <p id="note" class="note" role="status" hidden></p>
+
+    <details id="sec" class="sec" hidden>
+        <summary><span id="sec-dot" class="dot"></span><span id="sec-sum">Checking connection…</span></summary>
+        <ul id="sec-list"></ul>
+    </details>
 
     <!-- Receiving device (your PC) -->
     <section id="rx" hidden>
@@ -119,12 +143,15 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
         <div class="actions">
             <button id="paste" class="btn primary big" type="button" disabled>Paste from clipboard and send</button>
             <button id="send" class="btn big" type="button" disabled>Send text above</button>
+            <button id="pick" class="btn big" type="button" disabled>Choose files to send</button>
+            <input id="files" type="file" multiple hidden>
+            <p class="hint">Files up to <span id="limit"></span> each. You can also drop files anywhere on this page.</p>
         </div>
         <ol id="sent"></ol>
     </section>
 
     <footer>
-        <p>End-to-end encrypted with AES-256-GCM. The key exists only in the pairing link’s # part and on your two devices. The PeerJS server only helps the devices find each other and never sees your text. Nothing is stored; received text disappears when you close this page.</p>
+        <p>End-to-end encrypted with AES-256-GCM, for text and files alike. The key exists only in the pairing link’s # part and on your two devices. Before anything is sent, both devices check that the page and the pairing server use TLS, that the device-to-device link is DTLS encrypted, and that the other side holds your key. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other and never sees your data. Nothing is stored; received text and files disappear when you close this page.</p>
         <div class="row">
             <button id="rotate" class="btn quiet" type="button" hidden>New pairing code</button>
             <button id="forget" class="btn quiet" type="button" hidden>Forget this PC</button>
@@ -144,7 +171,9 @@ const CONFIG = {
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' }
     ],
-    maxChars: 20000                   // per message
+    maxChars: 20000,                  // per text message
+    maxFileBytes: 100 * 1024 * 1024,  // per file (the PC holds the whole file in memory until you download it)
+    chunk: 32 * 1024                  // bytes per encrypted file chunk
 };
 
 // ---------------------------------------------------------------- helpers
@@ -206,6 +235,70 @@ async function copyText(t) {
 
 const peerOptions = () => Object.assign({ debug: 0 }, CONFIG.peer, { config: { iceServers: CONFIG.ice } });
 const baseUrl = () => location.href.split('#')[0];
+const fmtSize = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB' : (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
+const safeName = (s) => String(s).replace(/[\u0000-\u001f\u007f<>:"\/\\|?*]+/g, '_').replace(/^[.\s]+|[\s.]+$/g, '').slice(0, 120) || 'file';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Reports what this page can verify about the live connection. Anything it can't confirm counts as a failure.
+async function checkLink(conn, peer, e2e) {
+    const checks = [];
+    const add = (ok, label, detail) => checks.push({ ok: !!ok, label, detail });
+
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    add(window.isSecureContext && (location.protocol === 'https:' || local), 'Page loaded over HTTPS',
+        location.protocol === 'https:' ? location.host : local ? 'localhost (fine for testing)' : 'Open this page from an https:// address');
+
+    const o = peer && peer.options;
+    add(o && o.secure === true, 'Pairing server reached over TLS (wss)', o ? (o.host || 'PeerJS server') : 'Not connected');
+
+    let dtls = false, detail = 'Couldn’t confirm', route = '';
+    const pc = conn && conn.open ? conn.peerConnection : null;
+    if (pc) {
+        try {
+            const stats = await pc.getStats(), byId = {};
+            let tr = null, pair = null;
+            stats.forEach((x) => { byId[x.id] = x; if (x.type === 'transport' && !tr) tr = x; });
+            if (tr) {
+                const ver = { FEFF: 'DTLS 1.0', FEFD: 'DTLS 1.2', FEFC: 'DTLS 1.3' }[tr.tlsVersion];
+                dtls = tr.dtlsState === 'connected' && tr.tlsVersion !== 'FEFF';
+                detail = dtls ? [ver || 'DTLS', tr.dtlsCipher].filter(Boolean).join(' · ')
+                    : 'DTLS state: ' + (tr.dtlsState || 'unknown') + (ver === 'DTLS 1.0' ? ' (outdated)' : '');
+                pair = byId[tr.selectedCandidatePairId];
+            }
+            if (!pair) stats.forEach((x) => { if (x.type === 'candidate-pair' && (x.selected || (x.nominated && x.state === 'succeeded'))) pair = x; });
+            if (pair) {
+                const l = byId[pair.localCandidateId], r = byId[pair.remoteCandidateId];
+                route = (l && l.candidateType === 'relay') || (r && r.candidateType === 'relay')
+                    ? 'Route: relayed through a TURN server (still end-to-end encrypted)' : 'Route: direct device to device';
+            }
+        } catch (e) { }
+        if (!dtls && detail === 'Couldn’t confirm') {
+            try { if (pc.sctp && pc.sctp.transport && pc.sctp.transport.state === 'connected') { dtls = true; detail = 'DTLS connected (this browser hides the details)'; } } catch (e) { }
+        }
+    } else detail = 'No open connection';
+    add(dtls, 'Device link encrypted (DTLS)', detail);
+    add(e2e, 'Pairing key verified (AES-256-GCM)', e2e ? 'Only your two devices hold the key' : 'Waiting for the other device to prove it has the key');
+    return { ok: checks.every((c) => c.ok), checks, route };
+}
+
+function renderSec(r) {
+    const box = $('sec');
+    if (!r) { box.hidden = true; return; }
+    box.hidden = false;
+    $('sec-dot').className = 'dot ' + (r.ok ? 'ok' : 'bad');
+    $('sec-sum').textContent = r.ok ? 'Secure: encrypted end to end' : 'Not secure: transfers blocked';
+    const list = $('sec-list'); list.innerHTML = '';
+    r.checks.forEach((c) => {
+        const li = document.createElement('li'); li.className = c.ok ? 'ok' : 'bad';
+        const m = document.createElement('span'); m.className = 'm'; m.textContent = c.ok ? '✓' : '✕';
+        const d = document.createElement('div'); d.textContent = c.label;
+        if (c.detail) { const sm = document.createElement('small'); sm.textContent = c.detail; d.appendChild(sm); }
+        li.append(m, d); list.appendChild(li);
+    });
+    if (r.route) { const li = document.createElement('li'); li.className = 'route'; li.textContent = r.route; list.appendChild(li); }
+    if (!r.ok && box.dataset.ok !== '0') box.open = true;
+    box.dataset.ok = r.ok ? '1' : '0';
+}
 
 function setNet(kind, text) {
     $('net-dot').className = 'dot ' + (kind === 'ok' ? 'ok' : kind === 'bad' ? 'bad' : '');
@@ -242,6 +335,7 @@ async function startReceiver() {
 
     const authed = new Set();      // connections that proved they hold the key
     const seen = new Set();        // message ids already shown
+    const incoming = new Map();    // file id -> transfer in progress
     let items = [];
     let peer = null, attempts = 0;
 
@@ -249,11 +343,24 @@ async function startReceiver() {
     autocopy.onchange = () => { try { localStorage.setItem('handoff.autocopy', autocopy.checked ? '1' : '0'); } catch (e) { } };
     try { autocopy.checked = localStorage.getItem('handoff.autocopy') !== '0'; } catch (e) { }
     $('mask').onchange = render;
-    $('clear').onclick = () => { items = []; render(); };
+    $('clear').onclick = () => { items.slice().forEach(drop); items = []; render(); };
 
     function status() {
-        if (authed.size) setHead('Phone connected', 'Paste on your phone and tap Send. It shows up here.');
+        if (authed.size) setHead('Phone connected', 'Send text or files from your phone. They show up here.');
         else setHead('Waiting for your phone', 'Scan the code once. After that, your phone just needs this page open.');
+    }
+
+    function paintFile(it) {
+        if (it.metaEl) it.metaEl.textContent = it.failed ? 'Failed: ' + it.failed : fmtSize(it.size) + (it.done ? '' : ' · receiving ' + Math.floor(it.got / it.size * 100) + '%');
+        if (it.barEl) it.barEl.style.width = (it.done ? 100 : it.got / it.size * 100) + '%';
+    }
+    function drop(it) {
+        if (it.t) { const t = it.t; incoming.delete(t.id); t.parts = []; it.t = null; reply(t.conn, { k: 'nack', id: t.id, why: 'cancelled' }); }
+        if (it.url) { URL.revokeObjectURL(it.url); it.url = null; }
+    }
+    function failTransfer(t, why) {
+        incoming.delete(t.id); t.parts = []; t.it.t = null; t.it.failed = why;
+        reply(t.conn, { k: 'nack', id: t.id, why }); render();
     }
 
     function render() {
@@ -262,33 +369,105 @@ async function startReceiver() {
         const masked = $('mask').checked;
         items.forEach((it) => {
             const li = document.createElement('li');
-            const pre = document.createElement('pre');
-            let shown = !masked;
-            const paint = () => { pre.textContent = shown ? it.text : '•'.repeat(Math.min(it.text.length, 24)) + '  (' + it.text.length + ' characters)'; };
-            paint();
             const foot = document.createElement('div'); foot.className = 'item-foot';
             const t = document.createElement('time'); t.textContent = new Date(it.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             foot.appendChild(t);
-            if (masked) {
-                const rev = document.createElement('button'); rev.className = 'btn'; rev.type = 'button'; rev.textContent = 'Show';
-                rev.onclick = () => { shown = !shown; rev.textContent = shown ? 'Hide' : 'Show'; paint(); };
-                foot.appendChild(rev);
+            if (it.file) {
+                const nm = document.createElement('div'); nm.className = 'file-name'; nm.textContent = it.name;
+                const meta = document.createElement('div'); meta.className = 'file-meta';
+                it.metaEl = meta; it.barEl = null;
+                li.append(nm, meta);
+                if (!it.done && !it.failed) {
+                    const mt = document.createElement('div'); mt.className = 'meter';
+                    const bar = document.createElement('i'); mt.appendChild(bar); li.appendChild(mt); it.barEl = bar;
+                }
+                paintFile(it);
+                if (it.done && it.url) {
+                    const dl = document.createElement('a'); dl.className = 'btn primary'; dl.textContent = 'Download'; dl.href = it.url; dl.download = it.name;
+                    foot.appendChild(dl);
+                }
+            } else {
+                const pre = document.createElement('pre');
+                let shown = !masked;
+                const paint = () => { pre.textContent = shown ? it.text : '•'.repeat(Math.min(it.text.length, 24)) + '  (' + it.text.length + ' characters)'; };
+                paint();
+                li.appendChild(pre);
+                if (masked) {
+                    const rev = document.createElement('button'); rev.className = 'btn'; rev.type = 'button'; rev.textContent = 'Show';
+                    rev.onclick = () => { shown = !shown; rev.textContent = shown ? 'Hide' : 'Show'; paint(); };
+                    foot.appendChild(rev);
+                }
+                const cp = document.createElement('button'); cp.className = 'btn primary'; cp.type = 'button'; cp.textContent = 'Copy';
+                cp.onclick = async () => { const ok = await copyText(it.text); cp.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { cp.textContent = 'Copy'; }, 1500); };
+                foot.appendChild(cp);
             }
-            const cp = document.createElement('button'); cp.className = 'btn primary'; cp.type = 'button'; cp.textContent = 'Copy';
-            cp.onclick = async () => { const ok = await copyText(it.text); cp.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { cp.textContent = 'Copy'; }, 1500); };
             const del = document.createElement('button'); del.className = 'btn'; del.type = 'button'; del.textContent = 'Delete';
-            del.onclick = () => { items = items.filter(x => x !== it); render(); };
-            foot.append(cp, del);
-            li.append(pre, foot); list.appendChild(li);
+            del.onclick = () => { drop(it); items = items.filter(x => x !== it); render(); };
+            foot.appendChild(del);
+            li.appendChild(foot); list.appendChild(li);
         });
     }
 
     async function reply(conn, obj) { try { conn.send(await seal(key, ch.id, obj)); } catch (e) { } }
 
+    // Runs the live security checks. Nothing is accepted from a connection that fails them.
+    async function secure(conn) {
+        const r = await checkLink(conn, peer, true);   // a frame only gets here if it decrypted with our key
+        renderSec(r);
+        return r.ok;
+    }
+
+    async function onFileStart(conn, m) {
+        if (typeof m.id !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(m.id)) return;
+        const nack = (why) => reply(conn, { k: 'nack', id: m.id, why });
+        if (incoming.has(m.id) || seen.has(m.id)) return nack('duplicate');
+        if (!(await secure(conn))) return nack('insecure');
+        if (!Number.isSafeInteger(m.size) || m.size < 1 || m.size > CONFIG.maxFileBytes) return nack('size');
+        if (typeof m.name !== 'string' || m.n !== Math.ceil(m.size / CONFIG.chunk)) return nack('invalid');
+        if (incoming.size >= 3) return nack('busy');
+        authed.add(conn);
+        const it = { file: true, name: safeName(m.name), size: m.size, got: 0, done: false, at: Date.now() };
+        const t = { id: m.id, conn, it, parts: [], next: 0 };
+        it.t = t; incoming.set(m.id, t);
+        items.unshift(it); render(); status();
+    }
+
+    async function onChunk(conn, m) {
+        const t = incoming.get(m.id);
+        if (!t || t.conn !== conn) return;
+        const n = Math.ceil(t.it.size / CONFIG.chunk);
+        const want = m.i === n - 1 ? t.it.size - CONFIG.chunk * (n - 1) : CONFIG.chunk;
+        let bytes = null;
+        if (m.i === t.next && m.i < n && typeof m.d === 'string') { try { bytes = unb64u(m.d); } catch (e) { } }
+        if (!bytes || bytes.length !== want) return failTransfer(t, 'corrupt or out-of-order data');
+        t.parts.push(bytes); t.next++; t.it.got += bytes.length;
+        paintFile(t.it);
+    }
+
+    async function onFileEnd(conn, m) {
+        const t = incoming.get(m.id);
+        if (!t || t.conn !== conn) return;
+        const it = t.it, n = Math.ceil(it.size / CONFIG.chunk);
+        if (t.next !== n || it.got !== it.size) return failTransfer(t, 'incomplete');
+        incoming.delete(t.id);
+        it.url = URL.createObjectURL(new Blob(t.parts, { type: 'application/octet-stream' }));
+        it.done = true; it.t = null; t.parts = [];
+        seen.add(t.id);
+        render();
+        await reply(conn, { k: 'ack', id: t.id });
+        if (document.hidden) document.title = '● New file — Handoff';
+        note('Received ' + it.name + '. Press Download to save it. Only open files you sent yourself.');
+        setTimeout(() => note(''), 5000);
+    }
+
     async function onMsg(conn, m) {
         if (!m || typeof m !== 'object') return;
-        if (m.k === 'hi') { authed.add(conn); await reply(conn, { k: 'hi' }); status(); return; }
+        if (m.k === 'hi') {
+            if (!(await secure(conn))) { authed.delete(conn); await reply(conn, { k: 'refuse' }); status(); return; }
+            authed.add(conn); await reply(conn, { k: 'hi' }); status(); return;
+        }
         if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') {
+            if (!(await secure(conn))) { await reply(conn, { k: 'nack', id: m.id, why: 'insecure' }); return; }
             authed.add(conn);
             if (!seen.has(m.id)) {
                 seen.add(m.id);
@@ -303,7 +482,11 @@ async function startReceiver() {
             }
             await reply(conn, { k: 'ack', id: m.id });
             status();
+            return;
         }
+        if (m.k === 'file') return onFileStart(conn, m);
+        if (m.k === 'chunk') return onChunk(conn, m);
+        if (m.k === 'fend') return onFileEnd(conn, m);
     }
 
     function open() {
@@ -311,12 +494,20 @@ async function startReceiver() {
         const p = peer = new Peer(ch.id, peerOptions());
         p.on('open', () => { if (peer !== p) return; attempts = 0; setNet('ok', 'Online'); status(); });
         p.on('connection', (conn) => {
-            let bad = 0;
-            conn.on('data', async (d) => {
-                try { await onMsg(conn, await unseal(key, ch.id, d)); }
-                catch (e) { if (++bad >= 5) { try { conn.close(); } catch (e2) { } } }   // not our pair: ignore, then drop
+            let bad = 0, chain = Promise.resolve();
+            // Frames are handled strictly in arrival order, which file chunks depend on.
+            conn.on('data', (d) => {
+                chain = chain.then(async () => {
+                    try { await onMsg(conn, await unseal(key, ch.id, d)); }
+                    catch (e) { if (++bad >= 5) { try { conn.close(); } catch (e2) { } } }   // not our pair: ignore, then drop
+                });
             });
-            conn.on('close', () => { authed.delete(conn); status(); });
+            conn.on('close', () => {
+                authed.delete(conn);
+                incoming.forEach((t) => { if (t.conn === conn) failTransfer(t, 'connection lost'); });
+                if (!authed.size) renderSec(null);
+                status();
+            });
             conn.on('error', () => { });
         });
         p.on('disconnected', () => { if (peer !== p || p.destroyed) return; setNet('bad', 'Reconnecting'); try { p.reconnect(); } catch (e) { } });
@@ -345,17 +536,30 @@ async function startSender(tx) {
     $('rotate').hidden = true; $('forget').hidden = false;
     configureSwitch('tx');
     setHead('Connecting to your PC…', '');
+    $('limit').textContent = fmtSize(CONFIG.maxFileBytes);
     const key = await importKey(tx.key);
-    const box = $('box'), sendBtn = $('send'), pasteBtn = $('paste'), sentList = $('sent');
+    const box = $('box'), sendBtn = $('send'), pasteBtn = $('paste'), pickBtn = $('pick'), fileIn = $('files'), sentList = $('sent');
 
-    let peer = null, conn = null, ready = false, retryTimer = null, retryN = 0, helloTimer = null;
-    const pending = new Map();
+    let peer = null, conn = null, retryTimer = null, retryN = 0, helloTimer = null;
+    let e2e = false, secureOK = false, ready = false, queue = Promise.resolve();
+    const pending = new Map();     // text id -> status element
+    const waiters = new Map();     // file id -> callback for the PC's ack or nack
 
-    function setReady(v) {
-        ready = v;
-        sendBtn.disabled = pasteBtn.disabled = !v;
-        if (v) { setHead('Ready', 'Paste your text and send it. It lands on your PC.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
+    // Sending is only possible when the PC proved it holds the key AND every live security check passes.
+    function refresh() {
+        const was = ready;
+        ready = e2e && secureOK;
+        sendBtn.disabled = pasteBtn.disabled = pickBtn.disabled = !ready;
+        if (ready && !was) { setHead('Ready', 'Send text or files. They land on your PC.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
+        else if (e2e && !secureOK) { setHead('Not secure', 'Sending is blocked until every security check passes.'); setNet('bad', 'Blocked'); }
     }
+    function lost() { e2e = false; secureOK = false; refresh(); renderSec(null); }
+    async function verify() {
+        const r = await checkLink(conn, peer, e2e);
+        renderSec(r); secureOK = r.ok; refresh();
+        return r.ok;
+    }
+
     function retry(delay) {
         clearTimeout(retryTimer);
         retryN++;
@@ -366,22 +570,35 @@ async function startSender(tx) {
         if (!peer || peer.destroyed) return connect();
         if (!peer.open) return;                                        // 'open' handler will dial
         if (conn) { const old = conn; conn = null; try { old.close(); } catch (e) { } }
-        setReady(false);
+        lost();
         const c = conn = peer.connect(tx.id, { reliable: true });
         c.on('open', async () => {
             if (conn !== c) return;
             try { c.send(await seal(key, tx.id, { k: 'hi' })); } catch (e) { }
             helloTimer = setTimeout(() => {                            // the PC never answered with the right key
-                if (conn === c && !ready) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Scan the QR code on your PC again.', true); }
+                if (conn === c && !e2e) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Scan the QR code on your PC again.', true); }
             }, 5000);
         });
         c.on('data', async (d) => {
             if (conn !== c) return;
             let m; try { m = await unseal(key, tx.id, d); } catch (e) { return; }
-            if (m.k === 'hi') { clearTimeout(helloTimer); setReady(true); }
-            else if (m.k === 'ack' && pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st ok'; el.textContent = 'Delivered'; }
+            if (conn !== c) return;
+            if (m.k === 'hi') {
+                clearTimeout(helloTimer); e2e = true;
+                if (await verify()) note('');
+                else note('This connection didn’t pass the security checks, so nothing will be sent.', true);
+            } else if (m.k === 'refuse') {
+                clearTimeout(helloTimer); e2e = false; secureOK = false; refresh();
+                setHead('Not secure', 'Your PC reports that this connection isn’t secure, so nothing is sent.'); setNet('bad', 'Blocked');
+            } else if (m.k === 'ack') {
+                if (pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st ok'; el.textContent = 'Delivered'; }
+                else if (waiters.has(m.id)) waiters.get(m.id)({ ok: true });
+            } else if (m.k === 'nack') {
+                if (waiters.has(m.id)) waiters.get(m.id)({ ok: false, why: m.why });
+                else if (pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st bad'; el.textContent = refusal(m.why); }
+            }
         });
-        c.on('close', () => { if (conn !== c) return; conn = null; setReady(false); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
+        c.on('close', () => { if (conn !== c) return; conn = null; lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
         c.on('error', () => { });
     }
     function connect() {
@@ -391,27 +608,74 @@ async function startSender(tx) {
         p.on('error', (e) => {
             if (peer !== p) return;
             if (e.type === 'peer-unavailable') {
-                setReady(false); setHead('PC not online', 'Open Handoff on your PC. This will connect by itself.'); setNet('bad', 'Waiting for PC'); retry(3000);
+                lost(); setHead('PC not online', 'Open Handoff on your PC. This will connect by itself.'); setNet('bad', 'Waiting for PC'); retry(3000);
             } else {
-                setNet('bad', 'Offline'); setReady(false); retry();
+                setNet('bad', 'Offline'); lost(); retry();
                 if (e.type !== 'network') { try { p.destroy(); } catch (e2) { } peer = null; }
             }
         });
+    }
+
+    function refusal(why) {
+        return { insecure: 'PC: link not secure', size: 'PC: file too large', busy: 'PC busy, try again', cancelled: 'Cancelled on PC', duplicate: 'PC: duplicate' }[why] || 'Refused by PC';
+    }
+    function logRow(label) {
+        const li = document.createElement('li');
+        const a = document.createElement('span'); a.textContent = label;
+        const st = document.createElement('span'); st.className = 'st';
+        li.append(a, st); sentList.prepend(li);
+        return st;
     }
 
     async function send(text) {
         if (!ready || !conn) { note('Not connected yet.', true); return false; }
         if (!text.trim()) { note('Nothing to send.', true); return false; }
         if (text.length > CONFIG.maxChars) { note('That’s over ' + CONFIG.maxChars + ' characters.', true); return false; }
+        if (!(await verify()) || !conn) { note('Blocked: this connection isn’t secure.', true); return false; }
         const id = b64u(rnd(12));
         try { conn.send(await seal(key, tx.id, { k: 'msg', id, text })); } catch (e) { note('Could not send. Check the connection.', true); return false; }
         note('');
-        const li = document.createElement('li');
-        const a = document.createElement('span'); a.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters';
-        const st = document.createElement('span'); st.className = 'st'; st.textContent = 'Sending…';
-        li.append(a, st); sentList.prepend(li); pending.set(id, st);
+        const st = logRow(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters');
+        st.textContent = 'Sending…'; pending.set(id, st);
         setTimeout(() => { if (pending.has(id)) { pending.delete(id); st.className = 'st bad'; st.textContent = 'Not confirmed'; } }, 6000);
         return true;
+    }
+
+    // Files are read in slices, so a large file never sits fully in this phone's memory.
+    async function sendFile(file) {
+        const st = logRow(file.name + ' · ' + fmtSize(file.size));
+        st.textContent = 'Waiting…';
+        const fail = (t) => { st.className = 'st bad'; st.textContent = t; };
+        if (file.size < 1) return fail('Empty file');
+        if (file.size > CONFIG.maxFileBytes) return fail('Over ' + fmtSize(CONFIG.maxFileBytes));
+        if (!ready || !conn) return fail('Not connected');
+        if (!(await verify()) || !conn) return fail('Blocked: not secure');
+        const c = conn, id = b64u(rnd(12)), n = Math.ceil(file.size / CONFIG.chunk);
+        let result = null;
+        waiters.set(id, (r) => { result = r; });
+        const put = async (obj) => c.send(await seal(key, tx.id, obj));
+        try {
+            await put({ k: 'file', id, name: file.name, size: file.size, n });
+            for (let i = 0; i < n && !result; i++) {
+                if (conn !== c || !ready) { try { await put({ k: 'fend', id }); } catch (e) { } return fail('Interrupted'); }
+                while (c.open && !result && ((c.bufferSize || 0) > 4 || (c.dataChannel && c.dataChannel.bufferedAmount > 1048576))) await sleep(25);
+                const buf = await file.slice(i * CONFIG.chunk, (i + 1) * CONFIG.chunk).arrayBuffer();
+                await put({ k: 'chunk', id, i, d: b64u(buf) });
+                st.textContent = 'Sending ' + Math.floor((i + 1) / n * 100) + '%';
+            }
+            if (!result) {
+                await put({ k: 'fend', id });
+                for (let w = 0; w < 400 && !result && conn === c; w++) await sleep(50);   // wait up to 20 s for the PC to confirm
+            }
+        } catch (e) { return fail('Could not send'); }
+        finally { waiters.delete(id); }
+        if (result && result.ok) { st.className = 'st ok'; st.textContent = 'Delivered'; }
+        else fail(result ? refusal(result.why) : 'Not confirmed');
+    }
+    function addFiles(list) {
+        const files = Array.from(list || []);
+        fileIn.value = '';
+        files.forEach((f) => { queue = queue.then(() => sendFile(f)).catch(() => { }); });
     }
 
     sendBtn.onclick = async () => { if (await send(box.value)) { box.value = ''; } };
@@ -422,8 +686,17 @@ async function startSender(tx) {
             if (await send(t)) box.value = '';
         } catch (e) { note('Your browser blocked clipboard access. Paste into the box, then tap Send.', true); box.focus(); }
     };
+    pickBtn.onclick = () => fileIn.click();
+    fileIn.onchange = () => addFiles(fileIn.files);
+    document.addEventListener('dragover', (e) => { e.preventDefault(); if (ready) document.body.classList.add('dragging'); });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+    document.addEventListener('drop', (e) => {
+        e.preventDefault(); document.body.classList.remove('dragging');
+        if (ready && e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+    });
     $('forget').onclick = () => { if (confirm('Forget this PC? You’ll need to scan its QR code again.')) { store.del('tx'); store.setMode('rx'); location.replace(baseUrl()); } };
     document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready) { retryN = 0; dial(); } });
+    setInterval(() => { if (conn && e2e) verify(); }, 10000);   // keep re-checking while connected
     connect();
 }
 
