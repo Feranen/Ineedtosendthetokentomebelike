@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<!-- Only the PeerJS signaling server and the two script CDNs are reachable. If you self-host PeerJS, add your host to connect-src. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data:; connect-src https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'">
+<title>Handoff</title>
+<style>
+:root {
+    --ground: #E9F0EC; --paper: #F8FBF9; --ink: #14302B; --muted: #586F68; --line: #BCCEC6;
+    --accent: #2F4BFF; --accent-ink: #FFFFFF; --mark: #F4E45C; --bad: #B3321F; --ok: #1B7A4D;
+    --sans: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ground: #0F1916; --paper: #16231F; --ink: #E3EFEA; --muted: #8CA69C; --line: #2A3E37;
+        --accent: #8EA0FF; --accent-ink: #0F1916; --mark: #5E5410; --bad: #FF8E7A; --ok: #6FD6A0;
+    }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+    margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); line-height: 1.45;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+main { max-width: 36rem; margin: 0 auto; padding: 1.25rem 1.25rem 3rem; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.wordmark { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.01em; }
+.net { font-size: .85rem; color: var(--muted); display: flex; align-items: center; gap: .45rem; }
+.dot { width: .6rem; height: .6rem; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+h1 { font-size: clamp(1.8rem, 7vw, 2.5rem); line-height: 1.08; letter-spacing: -0.02em; margin: 1.6rem 0 .4rem; font-weight: 700; }
+.sub { margin: 0 0 1.4rem; color: var(--muted); font-size: 1.02rem; max-width: 30rem; }
+.note { margin: 0 0 1rem; padding: .6rem .8rem; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); font-size: .92rem; }
+.note.bad { border-color: var(--bad); color: var(--bad); }
+
+.pair { display: flex; gap: 1.1rem; align-items: center; flex-wrap: wrap; padding: 1rem; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+#qr { background: #fff; padding: 10px; border-radius: 8px; line-height: 0; flex: none; }
+#qr img, #qr canvas { max-width: 100%; height: auto; }
+.pair-text { flex: 1 1 12rem; min-width: 0; }
+.pair-text p { margin: 0 0 .6rem; font-size: .95rem; color: var(--muted); }
+.linkrow { display: flex; gap: .5rem; }
+.linkrow input { flex: 1; min-width: 0; font: .8rem var(--mono); padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 8px; background: var(--ground); color: var(--ink); }
+
+.btn { font: inherit; font-weight: 600; cursor: pointer; border-radius: 10px; border: 1.5px solid var(--line); background: var(--paper); color: var(--ink); padding: .55rem .9rem; }
+.btn:hover { border-color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.btn.big { width: 100%; padding: 1rem; font-size: 1.1rem; }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; text-decoration: underline; padding: .4rem .2rem; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.bar { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; align-items: center; margin: 1.6rem 0 .8rem; font-size: .92rem; color: var(--muted); }
+.bar label { display: flex; gap: .4rem; align-items: center; cursor: pointer; }
+.bar .btn { margin-left: auto; }
+#feed, #sent { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
+#feed li { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: .8rem; }
+#feed pre { margin: 0 0 .7rem; padding: .65rem .75rem; background: var(--mark); color: var(--ink); border-radius: 6px; font: .95rem/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14rem; overflow: auto; }
+.item-foot { display: flex; gap: .5rem; align-items: center; }
+.item-foot time { color: var(--muted); font-size: .85rem; margin-right: auto; }
+.empty { color: var(--muted); font-size: .95rem; padding: 1rem 0; }
+
+#box { width: 100%; min-height: 10rem; resize: vertical; font: 1rem/1.4 var(--mono); padding: .9rem; border: 1.5px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
+.actions { display: grid; gap: .6rem; margin-top: .8rem; }
+#sent { margin-top: 1.2rem; }
+#sent li { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: .6rem; }
+#sent .st.ok { color: var(--ok); font-weight: 600; } #sent .st.bad { color: var(--bad); font-weight: 600; }
+
+footer { margin-top: 2.4rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
+footer p { margin: 0 0 .6rem; max-width: 32rem; }
+footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+@media (prefers-reduced-motion: no-preference) { .btn { transition: border-color .12s, filter .12s; } }
+</style>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+<main>
+    <div class="top">
+        <span class="wordmark">Handoff</span>
+        <span class="net"><span id="net-dot" class="dot"></span><span id="net-text">Starting…</span></span>
+    </div>
+
+    <h1 id="headline">Starting…</h1>
+    <p id="sub" class="sub"></p>
+    <p id="note" class="note" role="status" hidden></p>
+
+    <!-- Receiving device (your PC) -->
+    <section id="rx" hidden>
+        <div class="pair">
+            <div id="qr" aria-label="Pairing QR code"></div>
+            <div class="pair-text">
+                <p>Scan with your phone’s camera. Or copy this link to it.</p>
+                <div class="linkrow">
+                    <input id="link" readonly aria-label="Pairing link">
+                    <button id="copy-link" class="btn" type="button">Copy</button>
+                </div>
+            </div>
+        </div>
+        <div class="bar">
+            <label><input type="checkbox" id="autocopy" checked> Copy new text automatically</label>
+            <label><input type="checkbox" id="mask"> Hide text</label>
+            <button id="clear" class="btn" type="button">Clear all</button>
+        </div>
+        <ol id="feed"></ol>
+        <p id="feed-empty" class="empty">Nothing received yet.</p>
+    </section>
+
+    <!-- Sending device (your phone) -->
+    <section id="tx" hidden>
+        <textarea id="box" placeholder="Paste a token or any text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Text to send"></textarea>
+        <div class="actions">
+            <button id="paste" class="btn primary big" type="button" disabled>Paste from clipboard and send</button>
+            <button id="send" class="btn big" type="button" disabled>Send text above</button>
+        </div>
+        <ol id="sent"></ol>
+    </section>
+
+    <footer>
+        <p>End-to-end encrypted with AES-256-GCM. The key exists only in the pairing link’s # part and on your two devices. The PeerJS server only helps the devices find each other and never sees your text. Nothing is stored; received text disappears when you close this page.</p>
+        <div class="row">
+            <button id="rotate" class="btn quiet" type="button" hidden>New pairing code</button>
+            <button id="forget" class="btn quiet" type="button" hidden>Forget this PC</button>
+            <button id="switch" class="btn quiet" type="button" hidden></button>
+        </div>
+    </footer>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+// ---------------------------------------------------------------- config
+const CONFIG = {
+    peer: {},                         // {} = free PeerJS cloud. Self-hosted: { host: 'peer.example.com', port: 443, path: '/', secure: true }
+    ice: [                            // add a TURN server here if your phone can't reach your PC on mobile data
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:global.stun.twilio.com:3478' }
+    ],
+    maxChars: 20000                   // per message
+};
+
+// ---------------------------------------------------------------- helpers
+const $ = (id) => document.getElementById(id);
+const enc = (s) => new TextEncoder().encode(s);
+const dec = (b) => new TextDecoder().decode(b);
+const rnd = (n) => crypto.getRandomValues(new Uint8Array(n));
+const b64u = (buf) => {
+    let s = ''; new Uint8Array(buf).forEach(x => { s += String.fromCharCode(x); });
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const unb64u = (str) => {
+    const s = str.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(s + '='.repeat((4 - s.length % 4) % 4));
+    const a = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+    return a;
+};
+// Peer IDs must be alphanumeric for the PeerJS server. 26 chars of [a-z0-9] is about 134 bits.
+const newId = () => { const A = 'abcdefghijklmnopqrstuvwxyz0123456789'; return Array.from(rnd(26), x => A[x % 36]).join(''); };
+const ID_RE = /^[a-z0-9]{26}$/, KEY_RE = /^[A-Za-z0-9_-]{43}$/;
+
+const store = {
+    get(k) { try { const v = JSON.parse(localStorage.getItem('handoff.' + k)); return v && ID_RE.test(v.id) && KEY_RE.test(v.key) ? v : null; } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem('handoff.' + k, JSON.stringify(v)); } catch (e) { } },
+    del(k) { try { localStorage.removeItem('handoff.' + k); } catch (e) { } },
+    mode() { try { return localStorage.getItem('handoff.mode'); } catch (e) { return null; } },
+    setMode(m) { try { localStorage.setItem('handoff.mode', m); } catch (e) { } }
+};
+
+// Every message is AES-GCM sealed. The channel id is bound in as additional data, so a
+// message can't be replayed into a different channel. A failed decrypt means "not from our pair".
+const importKey = (k) => crypto.subtle.importKey('raw', unb64u(k), 'AES-GCM', false, ['encrypt', 'decrypt']);
+async function seal(key, chan, obj) {
+    const iv = rnd(12);
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc(chan) }, key, enc(JSON.stringify(obj)));
+    return JSON.stringify({ i: b64u(iv), c: b64u(ct) });
+}
+async function unseal(key, chan, wire) {
+    if (typeof wire !== 'string' || wire.length > 120000) throw new Error('bad frame');
+    const m = JSON.parse(wire);
+    const iv = unb64u(m.i);
+    if (iv.length !== 12) throw new Error('bad iv');
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc(chan) }, key, unb64u(m.c));
+    return JSON.parse(dec(pt));
+}
+
+async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); return true; }
+    catch (e) {
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = t; ta.style.cssText = 'position:fixed;opacity:0';
+            document.body.appendChild(ta); ta.select();
+            const ok = document.execCommand('copy'); ta.remove(); return ok;
+        } catch (e2) { return false; }
+    }
+}
+
+const peerOptions = () => Object.assign({ debug: 0 }, CONFIG.peer, { config: { iceServers: CONFIG.ice } });
+const baseUrl = () => location.href.split('#')[0];
+
+function setNet(kind, text) {
+    $('net-dot').className = 'dot ' + (kind === 'ok' ? 'ok' : kind === 'bad' ? 'bad' : '');
+    $('net-text').textContent = text;
+}
+function setHead(h, s) { $('headline').textContent = h; $('sub').textContent = s || ''; }
+function note(text, bad) {
+    const n = $('note');
+    if (!text) { n.hidden = true; return; }
+    n.hidden = false; n.textContent = text; n.className = 'note' + (bad ? ' bad' : '');
+}
+function fatal(text) { setHead('Can’t start', ''); note(text, true); setNet('bad', 'Stopped'); }
+
+// ---------------------------------------------------------------- receiver (PC)
+async function startReceiver() {
+    $('rx').hidden = false; $('tx').hidden = true;
+    $('rotate').hidden = false; $('forget').hidden = true;
+    configureSwitch('rx');
+
+    let ch = store.get('rx');
+    if (!ch) { ch = { id: newId(), key: b64u(rnd(32)) }; store.set('rx', ch); }
+    const key = await importKey(ch.key);
+
+    const link = baseUrl() + '#' + ch.id + '.' + ch.key;
+    $('link').value = link;
+    if (typeof QRCode !== 'undefined') {
+        $('qr').innerHTML = '';
+        new QRCode($('qr'), { text: link, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
+    } else { $('qr').hidden = true; }
+    if (location.protocol === 'file:') {
+        note('This page is open from a file, so a phone can’t open the link. Put handoff.html on any HTTPS static host (GitHub Pages, Netlify, Cloudflare Pages) and open it from there.', true);
+    }
+    $('copy-link').onclick = async (e) => { const ok = await copyText(link); e.target.textContent = ok ? 'Copied' : 'Press Ctrl+C'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); };
+
+    const authed = new Set();      // connections that proved they hold the key
+    const seen = new Set();        // message ids already shown
+    let items = [];
+    let peer = null, attempts = 0;
+
+    const autocopy = $('autocopy');
+    autocopy.onchange = () => { try { localStorage.setItem('handoff.autocopy', autocopy.checked ? '1' : '0'); } catch (e) { } };
+    try { autocopy.checked = localStorage.getItem('handoff.autocopy') !== '0'; } catch (e) { }
+    $('mask').onchange = render;
+    $('clear').onclick = () => { items = []; render(); };
+
+    function status() {
+        if (authed.size) setHead('Phone connected', 'Paste on your phone and tap Send. It shows up here.');
+        else setHead('Waiting for your phone', 'Scan the code once. After that, your phone just needs this page open.');
+    }
+
+    function render() {
+        const list = $('feed'); list.innerHTML = '';
+        $('feed-empty').hidden = items.length > 0;
+        const masked = $('mask').checked;
+        items.forEach((it) => {
+            const li = document.createElement('li');
+            const pre = document.createElement('pre');
+            let shown = !masked;
+            const paint = () => { pre.textContent = shown ? it.text : '•'.repeat(Math.min(it.text.length, 24)) + '  (' + it.text.length + ' characters)'; };
+            paint();
+            const foot = document.createElement('div'); foot.className = 'item-foot';
+            const t = document.createElement('time'); t.textContent = new Date(it.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            foot.appendChild(t);
+            if (masked) {
+                const rev = document.createElement('button'); rev.className = 'btn'; rev.type = 'button'; rev.textContent = 'Show';
+                rev.onclick = () => { shown = !shown; rev.textContent = shown ? 'Hide' : 'Show'; paint(); };
+                foot.appendChild(rev);
+            }
+            const cp = document.createElement('button'); cp.className = 'btn primary'; cp.type = 'button'; cp.textContent = 'Copy';
+            cp.onclick = async () => { const ok = await copyText(it.text); cp.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { cp.textContent = 'Copy'; }, 1500); };
+            const del = document.createElement('button'); del.className = 'btn'; del.type = 'button'; del.textContent = 'Delete';
+            del.onclick = () => { items = items.filter(x => x !== it); render(); };
+            foot.append(cp, del);
+            li.append(pre, foot); list.appendChild(li);
+        });
+    }
+
+    async function reply(conn, obj) { try { conn.send(await seal(key, ch.id, obj)); } catch (e) { } }
+
+    async function onMsg(conn, m) {
+        if (!m || typeof m !== 'object') return;
+        if (m.k === 'hi') { authed.add(conn); await reply(conn, { k: 'hi' }); status(); return; }
+        if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') {
+            authed.add(conn);
+            if (!seen.has(m.id)) {
+                seen.add(m.id);
+                const it = { text: m.text.slice(0, CONFIG.maxChars), at: Date.now() };
+                items.unshift(it); render();
+                if (autocopy.checked) {
+                    const ok = await copyText(it.text);
+                    note(ok ? 'Copied to your clipboard.' : 'Received. Your browser blocked auto-copy, so press Copy.', !ok);
+                    setTimeout(() => note(''), 2500);
+                }
+                if (document.hidden) document.title = '● New text — Handoff';
+            }
+            await reply(conn, { k: 'ack', id: m.id });
+            status();
+        }
+    }
+
+    function open() {
+        if (peer) { try { peer.destroy(); } catch (e) { } }
+        const p = peer = new Peer(ch.id, peerOptions());
+        p.on('open', () => { if (peer !== p) return; attempts = 0; setNet('ok', 'Online'); status(); });
+        p.on('connection', (conn) => {
+            let bad = 0;
+            conn.on('data', async (d) => {
+                try { await onMsg(conn, await unseal(key, ch.id, d)); }
+                catch (e) { if (++bad >= 5) { try { conn.close(); } catch (e2) { } } }   // not our pair: ignore, then drop
+            });
+            conn.on('close', () => { authed.delete(conn); status(); });
+            conn.on('error', () => { });
+        });
+        p.on('disconnected', () => { if (peer !== p || p.destroyed) return; setNet('bad', 'Reconnecting'); try { p.reconnect(); } catch (e) { } });
+        p.on('error', (e) => {
+            if (peer !== p) return;
+            if (e.type === 'unavailable-id') {
+                if (attempts++ < 10) { setNet('bad', 'Waiting for old session'); setTimeout(open, 3000); }
+                else fatal('Handoff is already open in another tab or window on this device. Close it and reload.');
+            } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
+                setNet('bad', 'Offline');
+            }
+        });
+    }
+
+    $('rotate').onclick = () => {
+        if (!confirm('Create a new pairing code? Phones paired before will stop working until they scan the new one.')) return;
+        store.del('rx'); location.replace(baseUrl());
+    };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
+    status(); render(); open();
+}
+
+// ---------------------------------------------------------------- sender (phone)
+async function startSender(tx) {
+    $('tx').hidden = false; $('rx').hidden = true;
+    $('rotate').hidden = true; $('forget').hidden = false;
+    configureSwitch('tx');
+    setHead('Connecting to your PC…', '');
+    const key = await importKey(tx.key);
+    const box = $('box'), sendBtn = $('send'), pasteBtn = $('paste'), sentList = $('sent');
+
+    let peer = null, conn = null, ready = false, retryTimer = null, retryN = 0, helloTimer = null;
+    const pending = new Map();
+
+    function setReady(v) {
+        ready = v;
+        sendBtn.disabled = pasteBtn.disabled = !v;
+        if (v) { setHead('Ready', 'Paste your text and send it. It lands on your PC.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
+    }
+    function retry(delay) {
+        clearTimeout(retryTimer);
+        retryN++;
+        retryTimer = setTimeout(dial, delay || Math.min(1000 * retryN, 8000));
+    }
+    function dial() {
+        clearTimeout(retryTimer); clearTimeout(helloTimer);
+        if (!peer || peer.destroyed) return connect();
+        if (!peer.open) return;                                        // 'open' handler will dial
+        if (conn) { const old = conn; conn = null; try { old.close(); } catch (e) { } }
+        setReady(false);
+        const c = conn = peer.connect(tx.id, { reliable: true });
+        c.on('open', async () => {
+            if (conn !== c) return;
+            try { c.send(await seal(key, tx.id, { k: 'hi' })); } catch (e) { }
+            helloTimer = setTimeout(() => {                            // the PC never answered with the right key
+                if (conn === c && !ready) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Scan the QR code on your PC again.', true); }
+            }, 5000);
+        });
+        c.on('data', async (d) => {
+            if (conn !== c) return;
+            let m; try { m = await unseal(key, tx.id, d); } catch (e) { return; }
+            if (m.k === 'hi') { clearTimeout(helloTimer); setReady(true); }
+            else if (m.k === 'ack' && pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st ok'; el.textContent = 'Delivered'; }
+        });
+        c.on('close', () => { if (conn !== c) return; conn = null; setReady(false); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
+        c.on('error', () => { });
+    }
+    function connect() {
+        const p = peer = new Peer(undefined, peerOptions());
+        p.on('open', () => { if (peer === p) dial(); });
+        p.on('disconnected', () => { if (peer !== p || p.destroyed) return; try { p.reconnect(); } catch (e) { } });
+        p.on('error', (e) => {
+            if (peer !== p) return;
+            if (e.type === 'peer-unavailable') {
+                setReady(false); setHead('PC not online', 'Open Handoff on your PC. This will connect by itself.'); setNet('bad', 'Waiting for PC'); retry(3000);
+            } else {
+                setNet('bad', 'Offline'); setReady(false); retry();
+                if (e.type !== 'network') { try { p.destroy(); } catch (e2) { } peer = null; }
+            }
+        });
+    }
+
+    async function send(text) {
+        if (!ready || !conn) { note('Not connected yet.', true); return false; }
+        if (!text.trim()) { note('Nothing to send.', true); return false; }
+        if (text.length > CONFIG.maxChars) { note('That’s over ' + CONFIG.maxChars + ' characters.', true); return false; }
+        const id = b64u(rnd(12));
+        try { conn.send(await seal(key, tx.id, { k: 'msg', id, text })); } catch (e) { note('Could not send. Check the connection.', true); return false; }
+        note('');
+        const li = document.createElement('li');
+        const a = document.createElement('span'); a.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters';
+        const st = document.createElement('span'); st.className = 'st'; st.textContent = 'Sending…';
+        li.append(a, st); sentList.prepend(li); pending.set(id, st);
+        setTimeout(() => { if (pending.has(id)) { pending.delete(id); st.className = 'st bad'; st.textContent = 'Not confirmed'; } }, 6000);
+        return true;
+    }
+
+    sendBtn.onclick = async () => { if (await send(box.value)) { box.value = ''; } };
+    box.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBtn.click(); });
+    pasteBtn.onclick = async () => {
+        try {
+            const t = await navigator.clipboard.readText();
+            if (await send(t)) box.value = '';
+        } catch (e) { note('Your browser blocked clipboard access. Paste into the box, then tap Send.', true); box.focus(); }
+    };
+    $('forget').onclick = () => { if (confirm('Forget this PC? You’ll need to scan its QR code again.')) { store.del('tx'); store.setMode('rx'); location.replace(baseUrl()); } };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready) { retryN = 0; dial(); } });
+    connect();
+}
+
+function configureSwitch(mode) {
+    const b = $('switch');
+    const hasTx = !!store.get('tx'), hasRx = !!store.get('rx');
+    if (mode === 'rx' && hasTx) { b.hidden = false; b.textContent = 'Use this device to send'; b.onclick = () => { store.setMode('tx'); location.reload(); }; }
+    else if (mode === 'tx') { b.hidden = false; b.textContent = 'Use this device to receive'; b.onclick = () => { store.setMode('rx'); location.reload(); }; }
+    else b.hidden = true;
+}
+
+// ---------------------------------------------------------------- boot
+async function boot() {
+    if (!window.crypto || !crypto.subtle) { fatal('Your browser only allows encryption on HTTPS pages (or localhost). Open this page over HTTPS.'); return; }
+    if (typeof Peer === 'undefined') { fatal('The connection library didn’t load. Check your network and reload.'); return; }
+
+    // Opening a pairing link makes this device the sender, then removes the secret from the address bar.
+    const m = location.hash.match(/^#([a-z0-9]{26})\.([A-Za-z0-9_-]{43})$/);
+    if (m) {
+        store.set('tx', { id: m[1], key: m[2] }); store.setMode('tx');
+        history.replaceState(null, '', location.pathname + location.search);
+    } else if (location.hash) {
+        history.replaceState(null, '', location.pathname + location.search);
+    }
+
+    const tx = store.get('tx'), mode = store.mode();
+    if (tx && (mode === 'tx' || (!store.get('rx') && mode !== 'rx'))) await startSender(tx);
+    else await startReceiver();
+}
+window.addEventListener('load', () => { boot().catch((e) => { console.error(e); fatal('Something went wrong while starting: ' + (e && e.message || e)); }); });
+})();
+</script>
+</body>
+</html>
