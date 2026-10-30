@@ -96,6 +96,9 @@ footer { margin-top: 2.4rem; padding-top: 1rem; border-top: 1px solid var(--line
 footer p { margin: 0 0 .6rem; max-width: 32rem; }
 footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
 @media (prefers-reduced-motion: no-preference) { .btn { transition: border-color .12s, filter .12s; } }
+
+.bar select { font: inherit; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
+#repair { width: 100%; margin: 0 0 1rem; }
 </style>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -118,19 +121,29 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
 
     <!-- Receiving device (your PC) -->
     <section id="rx" hidden>
-        <div class="pair">
+        <div id="pairbox" class="pair">
             <div id="qr" aria-label="Pairing QR code"></div>
             <div class="pair-text">
-                <p>Scan with your phone’s camera. Or copy this link to it.</p>
+                <p>Scan with your phone’s camera, or copy this link to it. The code works once, then it’s used up.</p>
                 <div class="linkrow">
                     <input id="link" readonly aria-label="Pairing link">
                     <button id="copy-link" class="btn" type="button">Copy</button>
                 </div>
             </div>
         </div>
+        <button id="repair" class="btn primary" type="button" hidden>New pairing code</button>
         <div class="bar">
-            <label><input type="checkbox" id="autocopy" checked> Copy new text automatically</label>
+            <label><input type="checkbox" id="autocopy"> Copy new text automatically</label>
             <label><input type="checkbox" id="mask"> Hide text</label>
+            <label>Auto-delete after
+                <select id="ttl" aria-label="Auto-delete received items after">
+                    <option value="1">1 min</option>
+                    <option value="5">5 min</option>
+                    <option value="15" selected>15 min</option>
+                    <option value="60">1 hour</option>
+                    <option value="0">Never</option>
+                </select>
+            </label>
             <button id="clear" class="btn" type="button">Clear all</button>
         </div>
         <ol id="feed"></ol>
@@ -139,7 +152,7 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
 
     <!-- Sending device (your phone) -->
     <section id="tx" hidden>
-        <textarea id="box" placeholder="Paste a token or any text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Text to send"></textarea>
+        <textarea id="box" placeholder="Paste a token or any text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Text to send"></textarea>
         <div class="actions">
             <button id="paste" class="btn primary big" type="button" disabled>Paste from clipboard and send</button>
             <button id="send" class="btn big" type="button" disabled>Send text above</button>
@@ -151,15 +164,13 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
     </section>
 
     <footer>
-        <p>End-to-end encrypted with AES-256-GCM, for text and files alike. The key exists only in the pairing link’s # part and on your two devices. Before anything is sent, both devices check that the page and the pairing server use TLS, that the device-to-device link is DTLS encrypted, and that the other side holds your key. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other and never sees your data. Nothing is stored; received text and files disappear when you close this page.</p>
+        <p>Nothing is saved on either device: no cookies, no local storage, no history of what you send. Everything lives in memory and is wiped when you close or leave this page. Each session creates fresh one-time ECDH P-256 key pairs, and the pairing code is used up the first time a phone connects. Text and files are sealed with AES-256-GCM using keys only your two devices can derive, so someone who can read the HTTPS traffic to the pairing server still can’t read your data. Before anything is sent, both devices check TLS, DTLS and the key exchange. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other.</p>
         <div class="row">
             <button id="rotate" class="btn quiet" type="button" hidden>New pairing code</button>
-            <button id="forget" class="btn quiet" type="button" hidden>Forget this PC</button>
-            <button id="switch" class="btn quiet" type="button" hidden></button>
+            <button id="forget" class="btn quiet" type="button" hidden>Disconnect and wipe</button>
         </div>
     </footer>
 </main>
-
 <script>
 (() => {
 'use strict';
@@ -176,8 +187,8 @@ const CONFIG = {
     chunk: 32 * 1024                  // bytes per encrypted file chunk
 };
 
-// ---------------------------------------------------------------- helpers
-const $ = (id) => document.getElementById(id);
+// ---------------------------------------------------------------- crypto core
+// <core>
 const enc = (s) => new TextEncoder().encode(s);
 const dec = (b) => new TextDecoder().decode(b);
 const rnd = (n) => crypto.getRandomValues(new Uint8Array(n));
@@ -192,34 +203,69 @@ const unb64u = (str) => {
     for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
     return a;
 };
-// Peer IDs must be alphanumeric for the PeerJS server. 26 chars of [a-z0-9] is about 134 bits.
-const newId = () => { const A = 'abcdefghijklmnopqrstuvwxyz0123456789'; return Array.from(rnd(26), x => A[x % 36]).join(''); };
-const ID_RE = /^[a-z0-9]{26}$/, KEY_RE = /^[A-Za-z0-9_-]{43}$/;
-
-const store = {
-    get(k) { try { const v = JSON.parse(localStorage.getItem('handoff.' + k)); return v && ID_RE.test(v.id) && KEY_RE.test(v.key) ? v : null; } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem('handoff.' + k, JSON.stringify(v)); } catch (e) { } },
-    del(k) { try { localStorage.removeItem('handoff.' + k); } catch (e) { } },
-    mode() { try { return localStorage.getItem('handoff.mode'); } catch (e) { return null; } },
-    setMode(m) { try { localStorage.setItem('handoff.mode', m); } catch (e) { } }
+const cat = (...a) => {
+    const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let p = 0;
+    a.forEach((x) => { o.set(x, p); p += x.length; });
+    return o;
 };
 
-// Every message is AES-GCM sealed. The channel id is bound in as additional data, so a
-// message can't be replayed into a different channel. A failed decrypt means "not from our pair".
-const importKey = (k) => crypto.subtle.importKey('raw', unb64u(k), 'AES-GCM', false, ['encrypt', 'decrypt']);
-async function seal(key, chan, obj) {
-    const iv = rnd(12);
-    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc(chan) }, key, enc(JSON.stringify(obj)));
-    return JSON.stringify({ i: b64u(iv), c: b64u(ct) });
+// Key pairs are created per session and per connection. Private keys are non-extractable and never leave memory.
+const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
+const AAD = enc('handoff/v2');
+const newPair = () => crypto.subtle.generateKey(ECDH, false, ['deriveBits']);
+const exportPub = async (pair) => new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+const importPub = (raw) => crypto.subtle.importKey('raw', raw, ECDH, false, []);
+const aesKey = (raw) => crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
+
+// Turns the ECDH result into two one-way AES-256-GCM keys plus a short code both screens can show.
+// The one-time pairing secret (salt) is mixed in, so only a device that scanned the code can derive them.
+async function sessionFrom(sharedBits, salt, pcPub, phonePub, isPhone) {
+    const ikm = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveBits']);
+    const info = cat(enc('handoff/v2/keys'), pcPub, phonePub);
+    const okm = new Uint8Array(await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, ikm, 640));
+    const toPc = await aesKey(okm.slice(0, 32)), toPhone = await aesKey(okm.slice(32, 64));
+    const sas = Array.from(okm.slice(64, 70), (x) => x.toString(16).padStart(2, '0')).join('').toUpperCase().replace(/(.{4})(?=.)/g, '$1-');
+    return makeSession(isPhone ? toPc : toPhone, isPhone ? toPhone : toPc, sas);
 }
-async function unseal(key, chan, wire) {
-    if (typeof wire !== 'string' || wire.length > 120000) throw new Error('bad frame');
-    const m = JSON.parse(wire);
-    const iv = unb64u(m.i);
-    if (iv.length !== 12) throw new Error('bad iv');
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: enc(chan) }, key, unb64u(m.c));
-    return JSON.parse(dec(pt));
+
+// One direction per key, counter nonces, strict ordering: a frame can't be replayed, reordered, dropped or reflected.
+function makeSession(sendKey, recvKey, sas) {
+    let sn = 0, rn = 0, sq = Promise.resolve(), rq = Promise.resolve();
+    const nonce = (n) => { const b = new Uint8Array(12), v = new DataView(b.buffer); v.setUint32(4, Math.floor(n / 4294967296)); v.setUint32(8, n >>> 0); return b; };
+    return {
+        sas,
+        send(conn, obj) {
+            const p = sq.then(async () => {
+                const n = sn;
+                const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce(n), additionalData: AAD }, sendKey, enc(JSON.stringify(obj)));
+                sn = n + 1;
+                conn.send(JSON.stringify({ n, c: b64u(ct) }));
+            });
+            sq = p.catch(() => { });
+            return p;
+        },
+        open(wire) {
+            const p = rq.then(async () => {
+                if (typeof wire !== 'string' || wire.length > 120000) throw new Error('bad frame');
+                const m = JSON.parse(wire);
+                if (!m || m.n !== rn || typeof m.c !== 'string') throw new Error('bad sequence');
+                const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce(rn), additionalData: AAD }, recvKey, unb64u(m.c));
+                rn++;
+                return JSON.parse(dec(pt));
+            });
+            rq = p.catch(() => { });
+            return p;
+        }
+    };
 }
+// </core>
+
+// ---------------------------------------------------------------- helpers
+const $ = (id) => document.getElementById(id);
+// Peer IDs must be alphanumeric for the PeerJS server. 26 chars of [a-z0-9] is about 134 bits.
+const newId = () => { const A = 'abcdefghijklmnopqrstuvwxyz0123456789'; return Array.from(rnd(26), x => A[x % 36]).join(''); };
+// Pairing link: #<pc id>.<pc public key, 65 bytes>.<one-time pairing secret, 16 bytes>
+const LINK_RE = /^#([a-z0-9]{26})\.([A-Za-z0-9_-]{87})\.([A-Za-z0-9_-]{22})$/;
 
 async function copyText(t) {
     try { await navigator.clipboard.writeText(t); return true; }
@@ -240,7 +286,7 @@ const safeName = (s) => String(s).replace(/[\u0000-\u001f\u007f<>:"\/\\|?*]+/g, 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Reports what this page can verify about the live connection. Anything it can't confirm counts as a failure.
-async function checkLink(conn, peer, e2e) {
+async function checkLink(conn, peer, e2e, sas) {
     const checks = [];
     const add = (ok, label, detail) => checks.push({ ok: !!ok, label, detail });
 
@@ -277,7 +323,8 @@ async function checkLink(conn, peer, e2e) {
         }
     } else detail = 'No open connection';
     add(dtls, 'Device link encrypted (DTLS)', detail);
-    add(e2e, 'Pairing key verified (AES-256-GCM)', e2e ? 'Only your two devices hold the key' : 'Waiting for the other device to prove it has the key');
+    add(e2e, 'Session keys verified (ECDH P-256, AES-256-GCM)',
+        e2e ? 'Fresh keys for this session. Code on both screens: ' + (sas || '?') : 'Waiting for the other device to prove it holds the keys');
     return { ok: checks.every((c) => c.ok), checks, route };
 }
 
@@ -316,38 +363,45 @@ function fatal(text) { setHead('Can’t start', ''); note(text, true); setNet('b
 async function startReceiver() {
     $('rx').hidden = false; $('tx').hidden = true;
     $('rotate').hidden = false; $('forget').hidden = true;
-    configureSwitch('rx');
 
-    let ch = store.get('rx');
-    if (!ch) { ch = { id: newId(), key: b64u(rnd(32)) }; store.set('rx', ch); }
-    const key = await importKey(ch.key);
-
-    const link = baseUrl() + '#' + ch.id + '.' + ch.key;
-    $('link').value = link;
-    if (typeof QRCode !== 'undefined') {
-        $('qr').innerHTML = '';
-        new QRCode($('qr'), { text: link, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
-    } else { $('qr').hidden = true; }
-    if (location.protocol === 'file:') {
-        note('This page is open from a file, so a phone can’t open the link. Put handoff.html on any HTTPS static host (GitHub Pages, Netlify, Cloudflare Pages) and open it from there.', true);
-    }
-    $('copy-link').onclick = async (e) => { const ok = await copyText(link); e.target.textContent = ok ? 'Copied' : 'Press Ctrl+C'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); };
-
-    const authed = new Set();      // connections that proved they hold the key
+    const authed = new Set();      // connections that proved they hold the session keys
+    const conns = new Set();       // every open connection (authed or not)
+    const cs = new WeakMap();      // connection -> handshake state
     const seen = new Set();        // message ids already shown
     const incoming = new Map();    // file id -> transfer in progress
     let items = [];
     let peer = null, attempts = 0;
+    let pr = null;                 // the current pairing: id, key pair, one-time secret
 
     const autocopy = $('autocopy');
-    autocopy.onchange = () => { try { localStorage.setItem('handoff.autocopy', autocopy.checked ? '1' : '0'); } catch (e) { } };
-    try { autocopy.checked = localStorage.getItem('handoff.autocopy') !== '0'; } catch (e) { }
     $('mask').onchange = render;
     $('clear').onclick = () => { items.slice().forEach(drop); items = []; render(); };
 
+    async function showPairing() {
+        const pair = await newPair(), ps = rnd(16);
+        pr = { id: newId(), pair, pub: await exportPub(pair), ps, salts: [ps], rs: null, done: false };
+        const link = baseUrl() + '#' + pr.id + '.' + b64u(pr.pub) + '.' + b64u(ps);
+        $('link').value = link;
+        $('qr').innerHTML = ''; $('qr').hidden = false;
+        if (typeof QRCode !== 'undefined') new QRCode($('qr'), { text: link, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+        else $('qr').hidden = true;
+        $('copy-link').onclick = async (e) => { const ok = await copyText(link); e.target.textContent = ok ? 'Copied' : 'Press Ctrl+C'; setTimeout(() => { e.target.textContent = 'Copy'; }, 1500); };
+    }
+    if (location.protocol === 'file:') {
+        note('This page is open from a file, so a phone can’t open the link. Put this file on any HTTPS static host (GitHub Pages, Netlify, Cloudflare Pages) and open it from there.', true);
+    }
+
     function status() {
         if (authed.size) setHead('Phone connected', 'Send text or files from your phone. They show up here.');
-        else setHead('Waiting for your phone', 'Scan the code once. After that, your phone just needs this page open.');
+        else if (pr.done) setHead('Phone disconnected', 'It reconnects by itself while its page stays open. If you closed that page, make a new pairing code.');
+        else setHead('Waiting for your phone', 'Scan the code. It works once, then it’s used up.');
+        $('pairbox').hidden = pr.done; $('repair').hidden = !pr.done;
+    }
+
+    function burnCode() {                     // the pairing code has done its job: remove every trace of it from the page
+        pr.salts = [pr.rs]; pr.done = true;
+        $('link').value = ''; $('qr').innerHTML = '';
+        status();
     }
 
     function paintFile(it) {
@@ -357,6 +411,7 @@ async function startReceiver() {
     function drop(it) {
         if (it.t) { const t = it.t; incoming.delete(t.id); t.parts = []; it.t = null; reply(t.conn, { k: 'nack', id: t.id, why: 'cancelled' }); }
         if (it.url) { URL.revokeObjectURL(it.url); it.url = null; }
+        it.text = ''; it.parts = null;
     }
     function failTransfer(t, why) {
         incoming.delete(t.id); t.parts = []; t.it.t = null; t.it.failed = why;
@@ -408,11 +463,16 @@ async function startReceiver() {
         });
     }
 
-    async function reply(conn, obj) { try { conn.send(await seal(key, ch.id, obj)); } catch (e) { } }
+    async function reply(conn, obj) {
+        const st = cs.get(conn);
+        if (!st || !st.sess) return;
+        try { await st.sess.send(conn, obj); } catch (e) { }
+    }
 
     // Runs the live security checks. Nothing is accepted from a connection that fails them.
     async function secure(conn) {
-        const r = await checkLink(conn, peer, true);   // a frame only gets here if it decrypted with our key
+        const st = cs.get(conn);
+        const r = await checkLink(conn, peer, true, st && st.sess && st.sess.sas);   // a frame only gets here if it decrypted with this session's keys
         renderSec(r);
         return r.ok;
     }
@@ -462,10 +522,19 @@ async function startReceiver() {
 
     async function onMsg(conn, m) {
         if (!m || typeof m !== 'object') return;
+        const st = cs.get(conn);
         if (m.k === 'hi') {
             if (!(await secure(conn))) { authed.delete(conn); await reply(conn, { k: 'refuse' }); status(); return; }
-            authed.add(conn); await reply(conn, { k: 'hi' }); status(); return;
+            authed.add(conn); await reply(conn, { k: 'hi' });
+            if (!pr.done) {
+                if (st.viaPs) {                   // first use of the pairing code: hand over a reconnect secret
+                    if (!pr.rs) { pr.rs = rnd(16); pr.salts = [pr.rs, pr.ps]; }
+                    await reply(conn, { k: 'resume', rs: b64u(pr.rs) });
+                } else if (pr.rs) burnCode();     // the phone already holds the reconnect secret
+            }
+            status(); return;
         }
+        if (m.k === 'rsok') { if (authed.has(conn) && pr.rs && !pr.done) burnCode(); return; }
         if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') {
             if (!(await secure(conn))) { await reply(conn, { k: 'nack', id: m.id, why: 'insecure' }); return; }
             authed.add(conn);
@@ -489,21 +558,52 @@ async function startReceiver() {
         if (m.k === 'fend') return onFileEnd(conn, m);
     }
 
+    // Frames arrive strictly in order. The first is the phone's one-off public key (plain), the rest are sealed.
+    async function handle(conn, st, d) {
+        if (typeof d !== 'string' || d.length > 120000) throw new Error('bad frame');
+        if (st.sess) return onMsg(conn, await st.sess.open(d));
+        const m = JSON.parse(d);
+        if (m && typeof m.h === 'string') {
+            if (st.bits) throw new Error('duplicate hello');
+            const raw = unb64u(m.h);
+            if (raw.length !== 65 || raw[0] !== 4) throw new Error('bad key');
+            st.phonePub = raw;
+            st.bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: await importPub(raw) }, pr.pair.privateKey, 256);
+            return;
+        }
+        if (!st.bits) throw new Error('no hello');
+        let found = null;
+        for (const salt of pr.salts.slice()) {
+            try {
+                const s = await sessionFrom(st.bits, salt, pr.pub, st.phonePub, false);
+                found = { s, salt, msg: await s.open(d) };
+                break;
+            } catch (e) { }
+        }
+        if (!found) throw new Error('not our pair');
+        st.sess = found.s; st.viaPs = found.salt === pr.ps;
+        return onMsg(conn, found.msg);
+    }
+
     function open() {
         if (peer) { try { peer.destroy(); } catch (e) { } }
-        const p = peer = new Peer(ch.id, peerOptions());
+        const mine = pr;
+        const p = peer = new Peer(mine.id, peerOptions());
         p.on('open', () => { if (peer !== p) return; attempts = 0; setNet('ok', 'Online'); status(); });
         p.on('connection', (conn) => {
-            let bad = 0, chain = Promise.resolve();
-            // Frames are handled strictly in arrival order, which file chunks depend on.
+            if (pr !== mine || conns.size >= 4) { try { conn.close(); } catch (e) { } return; }
+            conns.add(conn);
+            const st = { sess: null, bits: null, phonePub: null, viaPs: false, bad: 0 };
+            cs.set(conn, st);
+            let chain = Promise.resolve();
             conn.on('data', (d) => {
                 chain = chain.then(async () => {
-                    try { await onMsg(conn, await unseal(key, ch.id, d)); }
-                    catch (e) { if (++bad >= 5) { try { conn.close(); } catch (e2) { } } }   // not our pair: ignore, then drop
+                    try { await handle(conn, st, d); }
+                    catch (e) { if (++st.bad >= 5) { try { conn.close(); } catch (e2) { } } }   // not our pair: ignore, then drop
                 });
             });
             conn.on('close', () => {
-                authed.delete(conn);
+                conns.delete(conn); authed.delete(conn); cs.delete(conn);
                 incoming.forEach((t) => { if (t.conn === conn) failTransfer(t, 'connection lost'); });
                 if (!authed.size) renderSec(null);
                 status();
@@ -514,7 +614,7 @@ async function startReceiver() {
         p.on('error', (e) => {
             if (peer !== p) return;
             if (e.type === 'unavailable-id') {
-                if (attempts++ < 10) { setNet('bad', 'Waiting for old session'); setTimeout(open, 3000); }
+                if (attempts++ < 10) { setNet('bad', 'Waiting for old session'); setTimeout(() => { if (peer === p) open(); }, 3000); }
                 else fatal('Handoff is already open in another tab or window on this device. Close it and reload.');
             } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
                 setNet('bad', 'Offline');
@@ -522,11 +622,27 @@ async function startReceiver() {
         });
     }
 
-    $('rotate').onclick = () => {
-        if (!confirm('Create a new pairing code? Phones paired before will stop working until they scan the new one.')) return;
-        store.del('rx'); location.replace(baseUrl());
-    };
+    async function rotate() {
+        if (authed.size && !confirm('Create a new pairing code? The phone connected now will stop working until it scans the new one.')) return;
+        authed.clear(); renderSec(null);
+        await showPairing(); open(); status();
+    }
+    $('rotate').onclick = rotate; $('repair').onclick = rotate;
+
     document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
+
+    // Received items expire by themselves.
+    setInterval(() => {
+        const ms = (+$('ttl').value || 0) * 60000;
+        if (!ms) return;
+        const now = Date.now(), dead = items.filter((it) => !it.t && now - it.at > ms);
+        if (dead.length) { dead.forEach(drop); items = items.filter((x) => !dead.includes(x)); render(); }
+    }, 5000);
+
+    // Leaving the page wipes everything held in memory.
+    window.addEventListener('pagehide', () => { items.slice().forEach(drop); items = []; try { if (peer) peer.destroy(); } catch (e) { } });
+
+    await showPairing();
     status(); render(); open();
 }
 
@@ -534,18 +650,18 @@ async function startReceiver() {
 async function startSender(tx) {
     $('tx').hidden = false; $('rx').hidden = true;
     $('rotate').hidden = true; $('forget').hidden = false;
-    configureSwitch('tx');
     setHead('Connecting to your PC…', '');
     $('limit').textContent = fmtSize(CONFIG.maxFileBytes);
-    const key = await importKey(tx.key);
+    const pcPub = await importPub(tx.pub);
+    let salt = tx.salt;                       // the one-time pairing secret, until the PC hands over a reconnect secret
     const box = $('box'), sendBtn = $('send'), pasteBtn = $('paste'), pickBtn = $('pick'), fileIn = $('files'), sentList = $('sent');
 
-    let peer = null, conn = null, retryTimer = null, retryN = 0, helloTimer = null;
+    let peer = null, conn = null, sess = null, retryTimer = null, retryN = 0, helloTimer = null, closed = false;
     let e2e = false, secureOK = false, ready = false, queue = Promise.resolve();
     const pending = new Map();     // text id -> status element
     const waiters = new Map();     // file id -> callback for the PC's ack or nack
 
-    // Sending is only possible when the PC proved it holds the key AND every live security check passes.
+    // Sending is only possible when the PC proved it holds the session keys AND every live security check passes.
     function refresh() {
         const was = ready;
         ready = e2e && secureOK;
@@ -553,40 +669,42 @@ async function startSender(tx) {
         if (ready && !was) { setHead('Ready', 'Send text or files. They land on your PC.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
         else if (e2e && !secureOK) { setHead('Not secure', 'Sending is blocked until every security check passes.'); setNet('bad', 'Blocked'); }
     }
-    function lost() { e2e = false; secureOK = false; refresh(); renderSec(null); }
+    function lost() { e2e = false; secureOK = false; sess = null; refresh(); renderSec(null); }
     async function verify() {
-        const r = await checkLink(conn, peer, e2e);
+        const r = await checkLink(conn, peer, e2e, sess && sess.sas);
         renderSec(r); secureOK = r.ok; refresh();
         return r.ok;
     }
 
     function retry(delay) {
+        if (closed) return;
         clearTimeout(retryTimer);
         retryN++;
         retryTimer = setTimeout(dial, delay || Math.min(1000 * retryN, 8000));
     }
     function dial() {
+        if (closed) return;
         clearTimeout(retryTimer); clearTimeout(helloTimer);
         if (!peer || peer.destroyed) return connect();
         if (!peer.open) return;                                        // 'open' handler will dial
         if (conn) { const old = conn; conn = null; try { old.close(); } catch (e) { } }
         lost();
         const c = conn = peer.connect(tx.id, { reliable: true });
-        c.on('open', async () => {
-            if (conn !== c) return;
-            try { c.send(await seal(key, tx.id, { k: 'hi' })); } catch (e) { }
-            helloTimer = setTimeout(() => {                            // the PC never answered with the right key
-                if (conn === c && !e2e) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Scan the QR code on your PC again.', true); }
-            }, 5000);
-        });
-        c.on('data', async (d) => {
-            if (conn !== c) return;
-            let m; try { m = await unseal(key, tx.id, d); } catch (e) { return; }
+        let s = null, chain = Promise.resolve();
+
+        async function onData(d) {
+            if (conn !== c || !s) return;
+            let m; try { m = await s.open(d); } catch (e) { return; }
             if (conn !== c) return;
             if (m.k === 'hi') {
                 clearTimeout(helloTimer); e2e = true;
                 if (await verify()) note('');
                 else note('This connection didn’t pass the security checks, so nothing will be sent.', true);
+            } else if (m.k === 'resume') {
+                try {
+                    const rs = typeof m.rs === 'string' ? unb64u(m.rs) : null;
+                    if (rs && rs.length === 16) { salt = rs; await s.send(c, { k: 'rsok' }); }   // the pairing code is now used up
+                } catch (e) { }
             } else if (m.k === 'refuse') {
                 clearTimeout(helloTimer); e2e = false; secureOK = false; refresh();
                 setHead('Not secure', 'Your PC reports that this connection isn’t secure, so nothing is sent.'); setNet('bad', 'Blocked');
@@ -597,11 +715,30 @@ async function startSender(tx) {
                 if (waiters.has(m.id)) waiters.get(m.id)({ ok: false, why: m.why });
                 else if (pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st bad'; el.textContent = refusal(m.why); }
             }
+        }
+
+        c.on('open', async () => {
+            if (conn !== c) return;
+            try {
+                // A new one-off key pair for every connection.
+                const pair = await newPair(), mine = await exportPub(pair);
+                const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: pcPub }, pair.privateKey, 256);
+                s = await sessionFrom(bits, salt, tx.pub, mine, true);
+                if (conn !== c) return;
+                sess = s;
+                c.send(JSON.stringify({ v: 2, h: b64u(mine) }));
+                await s.send(c, { k: 'hi' });
+            } catch (e) { return; }
+            helloTimer = setTimeout(() => {                            // the PC never answered with the right keys
+                if (conn === c && !e2e) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Each pairing code works once. Make a new one on your PC and scan it again.', true); }
+            }, 5000);
         });
+        c.on('data', (d) => { chain = chain.then(() => onData(d)).catch(() => { }); });
         c.on('close', () => { if (conn !== c) return; conn = null; lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
         c.on('error', () => { });
     }
     function connect() {
+        if (closed) return;
         const p = peer = new Peer(undefined, peerOptions());
         p.on('open', () => { if (peer === p) dial(); });
         p.on('disconnected', () => { if (peer !== p || p.destroyed) return; try { p.reconnect(); } catch (e) { } });
@@ -628,12 +765,12 @@ async function startSender(tx) {
     }
 
     async function send(text) {
-        if (!ready || !conn) { note('Not connected yet.', true); return false; }
+        if (!ready || !conn || !sess) { note('Not connected yet.', true); return false; }
         if (!text.trim()) { note('Nothing to send.', true); return false; }
         if (text.length > CONFIG.maxChars) { note('That’s over ' + CONFIG.maxChars + ' characters.', true); return false; }
-        if (!(await verify()) || !conn) { note('Blocked: this connection isn’t secure.', true); return false; }
+        if (!(await verify()) || !conn || !sess) { note('Blocked: this connection isn’t secure.', true); return false; }
         const id = b64u(rnd(12));
-        try { conn.send(await seal(key, tx.id, { k: 'msg', id, text })); } catch (e) { note('Could not send. Check the connection.', true); return false; }
+        try { await sess.send(conn, { k: 'msg', id, text }); } catch (e) { note('Could not send. Check the connection.', true); return false; }
         note('');
         const st = logRow(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters');
         st.textContent = 'Sending…'; pending.set(id, st);
@@ -648,12 +785,12 @@ async function startSender(tx) {
         const fail = (t) => { st.className = 'st bad'; st.textContent = t; };
         if (file.size < 1) return fail('Empty file');
         if (file.size > CONFIG.maxFileBytes) return fail('Over ' + fmtSize(CONFIG.maxFileBytes));
-        if (!ready || !conn) return fail('Not connected');
-        if (!(await verify()) || !conn) return fail('Blocked: not secure');
-        const c = conn, id = b64u(rnd(12)), n = Math.ceil(file.size / CONFIG.chunk);
+        if (!ready || !conn || !sess) return fail('Not connected');
+        if (!(await verify()) || !conn || !sess) return fail('Blocked: not secure');
+        const c = conn, s = sess, id = b64u(rnd(12)), n = Math.ceil(file.size / CONFIG.chunk);
         let result = null;
         waiters.set(id, (r) => { result = r; });
-        const put = async (obj) => c.send(await seal(key, tx.id, obj));
+        const put = (obj) => s.send(c, obj);
         try {
             await put({ k: 'file', id, name: file.name, size: file.size, n });
             for (let i = 0; i < n && !result; i++) {
@@ -678,6 +815,16 @@ async function startSender(tx) {
         files.forEach((f) => { queue = queue.then(() => sendFile(f)).catch(() => { }); });
     }
 
+    // Drops the connection and everything held in memory.
+    function wipe() {
+        closed = true; clearTimeout(retryTimer); clearTimeout(helloTimer);
+        salt = null; sess = null; e2e = false; secureOK = false; ready = false;
+        box.value = ''; sentList.innerHTML = ''; pending.clear(); waiters.clear();
+        const c = conn, p = peer; conn = null; peer = null;
+        try { if (c) c.close(); } catch (e) { }
+        try { if (p) p.destroy(); } catch (e) { }
+    }
+
     sendBtn.onclick = async () => { if (await send(box.value)) { box.value = ''; } };
     box.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBtn.click(); });
     pasteBtn.onclick = async () => {
@@ -694,37 +841,35 @@ async function startSender(tx) {
         e.preventDefault(); document.body.classList.remove('dragging');
         if (ready && e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
     });
-    $('forget').onclick = () => { if (confirm('Forget this PC? You’ll need to scan its QR code again.')) { store.del('tx'); store.setMode('rx'); location.replace(baseUrl()); } };
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready) { retryN = 0; dial(); } });
+    $('forget').onclick = () => {
+        if (!confirm('Disconnect and wipe this page? To send again you’ll need to scan a new pairing code.')) return;
+        wipe();
+        $('tx').hidden = true; $('forget').hidden = true; renderSec(null); note('');
+        setHead('Disconnected', 'Nothing is stored on this device. Scan a new pairing code from your PC to connect again.'); setNet('', 'Closed');
+    };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready && !closed) { retryN = 0; dial(); } });
+    window.addEventListener('pagehide', wipe);
     setInterval(() => { if (conn && e2e) verify(); }, 10000);   // keep re-checking while connected
     connect();
-}
-
-function configureSwitch(mode) {
-    const b = $('switch');
-    const hasTx = !!store.get('tx'), hasRx = !!store.get('rx');
-    if (mode === 'rx' && hasTx) { b.hidden = false; b.textContent = 'Use this device to send'; b.onclick = () => { store.setMode('tx'); location.reload(); }; }
-    else if (mode === 'tx') { b.hidden = false; b.textContent = 'Use this device to receive'; b.onclick = () => { store.setMode('rx'); location.reload(); }; }
-    else b.hidden = true;
 }
 
 // ---------------------------------------------------------------- boot
 async function boot() {
     if (!window.crypto || !crypto.subtle) { fatal('Your browser only allows encryption on HTTPS pages (or localhost). Open this page over HTTPS.'); return; }
     if (typeof Peer === 'undefined') { fatal('The connection library didn’t load. Check your network and reload.'); return; }
+    // A page restored from the back/forward cache has lost its connection and keys, so start clean.
+    window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
 
-    // Opening a pairing link makes this device the sender, then removes the secret from the address bar.
-    const m = location.hash.match(/^#([a-z0-9]{26})\.([A-Za-z0-9_-]{43})$/);
-    if (m) {
-        store.set('tx', { id: m[1], key: m[2] }); store.setMode('tx');
-        history.replaceState(null, '', location.pathname + location.search);
-    } else if (location.hash) {
-        history.replaceState(null, '', location.pathname + location.search);
-    }
-
-    const tx = store.get('tx'), mode = store.mode();
-    if (tx && (mode === 'tx' || (!store.get('rx') && mode !== 'rx'))) await startSender(tx);
-    else await startReceiver();
+    // Opening a pairing link makes this device the sender. The link is read once, kept only in memory, and removed from the address bar.
+    const hash = location.hash;
+    if (hash) history.replaceState(null, '', location.pathname + location.search);
+    if (hash) {
+        const m = hash.match(LINK_RE);
+        let tx = null;
+        if (m) { try { const pub = unb64u(m[2]); if (pub.length === 65 && pub[0] === 4) tx = { id: m[1], pub, salt: unb64u(m[3]) }; } catch (e) { } }
+        if (!tx) { fatal('That pairing link is damaged or incomplete. Scan the QR code on your PC again.'); return; }
+        await startSender(tx);
+    } else await startReceiver();
 }
 window.addEventListener('load', () => { boot().catch((e) => { console.error(e); fatal('Something went wrong while starting: ' + (e && e.message || e)); }); });
 })();
