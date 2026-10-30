@@ -871,7 +871,18 @@ async function boot() {
         await startSender(tx);
     } else await startReceiver();
 }
-window.addEventListener('load', () => { boot().catch((e) => { console.error(e); fatal('Something went wrong while starting: ' + (e && e.message || e)); }); });
+// Start as soon as the page and PeerJS are ready (not on 'load', which can hang on phones while other resources load).
+window.addEventListener('error', (e) => { if ($('headline').textContent === 'Starting…') fatal('Error: ' + (e.message || 'script failed') + ' (' + (e.filename || 'page').split('/').pop() + ')'); });
+window.addEventListener('unhandledrejection', (e) => { if ($('headline').textContent === 'Starting…') fatal('Error: ' + ((e.reason && e.reason.message) || e.reason)); });
+let started = false;
+function go() {
+    if (started) return; started = true;
+    boot().catch((e) => { console.error(e); fatal('Something went wrong while starting: ' + (e && e.message || e)); });
+}
+(function waitForLibs(t0) {
+    if (typeof Peer !== 'undefined' || Date.now() - t0 > 12000) return go();
+    setTimeout(() => waitForLibs(t0), 100);
+})(Date.now());
 })();
 </script>
 </body>
