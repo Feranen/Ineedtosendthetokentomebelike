@@ -956,6 +956,7 @@ async function boot() {
 }
 window.addEventListener('load', () => { boot().catch((e) => { console.error(e); fatal('Something went wrong while starting: ' + (e && e.message || e)); }); });
 })();
+
 </script>
 </body>
 </html>
