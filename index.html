@@ -60,20 +60,22 @@ h1 { font-size: clamp(1.8rem, 7vw, 2.5rem); line-height: 1.08; letter-spacing: -
 .bar { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; align-items: center; margin: 1.6rem 0 .8rem; font-size: .92rem; color: var(--muted); }
 .bar label { display: flex; gap: .4rem; align-items: center; cursor: pointer; }
 .bar .btn { margin-left: auto; }
-#feed, #sent { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
-#feed li { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: .8rem; }
-#feed pre { margin: 0 0 .7rem; padding: .65rem .75rem; background: var(--mark); color: var(--ink); border-radius: 6px; font: .95rem/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14rem; overflow: auto; }
+.feed, .sent { list-style: none; margin: 0; padding: 0; display: grid; gap: .7rem; }
+.feed li { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: .8rem; }
+.feed pre { margin: 0 0 .7rem; padding: .65rem .75rem; background: var(--mark); color: var(--ink); border-radius: 6px; font: .95rem/1.4 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14rem; overflow: auto; }
 .item-foot { display: flex; gap: .5rem; align-items: center; }
 .item-foot time { color: var(--muted); font-size: .85rem; margin-right: auto; }
 .empty { color: var(--muted); font-size: .95rem; padding: 1rem 0; }
 
-#box { width: 100%; min-height: 10rem; resize: vertical; font: 1rem/1.4 var(--mono); padding: .9rem; border: 1.5px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
+#box, #pc-box { width: 100%; min-height: 10rem; resize: vertical; font: 1rem/1.4 var(--mono); padding: .9rem; border: 1.5px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
 .actions { display: grid; gap: .6rem; margin-top: .8rem; }
-#sent { margin-top: 1.2rem; }
-#sent li { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: .6rem; }
-#sent .st.ok { color: var(--ok); font-weight: 600; } #sent .st.bad { color: var(--bad); font-weight: 600; }
+.sent { margin-top: 1.2rem; }
+.sent li { display: flex; justify-content: space-between; gap: 1rem; font-size: .92rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: .6rem; }
+.sent .st.ok { color: var(--ok); font-weight: 600; } .sent .st.bad { color: var(--bad); font-weight: 600; }
 
 a.btn { display: inline-block; text-decoration: none; }
+.sec-title { font-size: 1.05rem; margin: 1.6rem 0 .6rem; letter-spacing: -0.01em; }
+.compose { margin-top: 1.6rem; }
 .sec { margin: 0 0 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); font-size: .9rem; }
 .sec summary { cursor: pointer; padding: .6rem .8rem; display: flex; align-items: center; gap: .5rem; font-weight: 600; list-style: none; }
 .sec summary::-webkit-details-marker { display: none; }
@@ -89,7 +91,7 @@ a.btn { display: inline-block; text-decoration: none; }
 .meter { height: .4rem; border-radius: 99px; background: var(--line); overflow: hidden; margin: 0 0 .7rem; }
 .meter > i { display: block; height: 100%; width: 0; background: var(--accent); }
 .hint { margin: .2rem 0 0; font-size: .85rem; color: var(--muted); }
-#sent li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.sent li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 body.dragging main { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
 footer { margin-top: 2.4rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted); }
@@ -132,22 +134,18 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
             </div>
         </div>
         <button id="repair" class="btn primary" type="button" hidden>New pairing code</button>
-        <div class="bar">
-            <label><input type="checkbox" id="autocopy"> Copy new text automatically</label>
-            <label><input type="checkbox" id="mask"> Hide text</label>
-            <label>Auto-delete after
-                <select id="ttl" aria-label="Auto-delete received items after">
-                    <option value="1">1 min</option>
-                    <option value="5">5 min</option>
-                    <option value="15" selected>15 min</option>
-                    <option value="60">1 hour</option>
-                    <option value="0">Never</option>
-                </select>
-            </label>
-            <button id="clear" class="btn" type="button">Clear all</button>
+        <div id="rx-send" class="compose" hidden>
+            <h2 class="sec-title">Send to phone</h2>
+            <textarea id="pc-box" placeholder="Type or paste text to send to your phone" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Text to send to phone"></textarea>
+            <div class="actions">
+                <button id="pc-send" class="btn primary big" type="button" disabled>Send text above</button>
+                <button id="pc-pick" class="btn big" type="button" disabled>Choose files to send</button>
+                <input id="pc-files" type="file" multiple hidden>
+                <p class="hint">Files up to <span id="pc-limit"></span> each. You can also drop files anywhere on this page.</p>
+            </div>
+            <ol id="pc-sent" class="sent"></ol>
         </div>
-        <ol id="feed"></ol>
-        <p id="feed-empty" class="empty">Nothing received yet.</p>
+        <div id="rx-inbox"></div>
     </section>
 
     <!-- Sending device (your phone) -->
@@ -160,11 +158,12 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
             <input id="files" type="file" multiple hidden>
             <p class="hint">Files up to <span id="limit"></span> each. You can also drop files anywhere on this page.</p>
         </div>
-        <ol id="sent"></ol>
+        <ol id="sent" class="sent"></ol>
+        <div id="tx-inbox"></div>
     </section>
 
     <footer>
-        <p>Nothing is saved on either device: no cookies, no local storage, no history of what you send. Everything lives in memory and is wiped when you close or leave this page. Each session creates fresh one-time ECDH P-256 key pairs, and the pairing code is used up the first time a phone connects. Text and files are sealed with AES-256-GCM using keys only your two devices can derive, so someone who can read the HTTPS traffic to the pairing server still can’t read your data. Before anything is sent, both devices check TLS, DTLS and the key exchange. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other.</p>
+        <p>Nothing is saved on either device: no cookies, no local storage, no history of what you send. Everything lives in memory and is wiped when you close or leave this page. Each session creates fresh one-time ECDH P-256 key pairs, and the pairing code is used up the first time a phone connects. Either device can send text and files to the other, and anything received stays hidden until you press Show. Text and files are sealed with AES-256-GCM using keys only your two devices can derive, so someone who can read the HTTPS traffic to the pairing server still can’t read your data. Before anything is sent, both devices check TLS, DTLS and the key exchange. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other.</p>
         <div class="row">
             <button id="rotate" class="btn quiet" type="button" hidden>New pairing code</button>
             <button id="forget" class="btn quiet" type="button" hidden>Disconnect and wipe</button>
@@ -359,6 +358,246 @@ function note(text, bad) {
 }
 function fatal(text) { setHead('Can’t start', ''); note(text, true); setNet('bad', 'Stopped'); }
 
+
+// ---------------------------------------------------------------- shared: received items (hidden by default)
+function createInbox(container, o) {
+    const mk = (tag, props) => Object.assign(document.createElement(tag), props);
+    container.innerHTML = '';
+    const bar = mk('div', { className: 'bar' });
+    let auto = null;
+    if (o.autocopy) { auto = mk('input', { type: 'checkbox' }); bar.appendChild(mk('label')).append(auto, ' Copy new text automatically'); }
+    const mask = mk('input', { type: 'checkbox', checked: true });
+    bar.appendChild(mk('label')).append(mask, ' Hide received items');
+    const ttl = mk('select'); ttl.setAttribute('aria-label', 'Auto-delete received items after');
+    [['1', '1 min'], ['5', '5 min'], ['15', '15 min'], ['60', '1 hour'], ['0', 'Never']].forEach(([v, t]) => ttl.appendChild(mk('option', { value: v, textContent: t, selected: v === '15' })));
+    bar.appendChild(mk('label')).append('Auto-delete after ', ttl);
+    const clear = bar.appendChild(mk('button', { className: 'btn', type: 'button', textContent: 'Clear all' }));
+    const list = mk('ol', { className: 'feed' });
+    const empty = mk('p', { className: 'empty', textContent: 'Nothing received yet.' });
+    container.append(mk('h2', { className: 'sec-title', textContent: o.title }), bar, list, empty);
+
+    const incoming = new Map();    // file id -> transfer in progress
+    const seen = new Set();        // ids already shown
+    let items = [];
+
+    function paintFile(it) {
+        if (it.metaEl) it.metaEl.textContent = it.failed ? 'Failed: ' + it.failed : fmtSize(it.size) + (it.done ? '' : ' · receiving ' + Math.floor(it.got / it.size * 100) + '%');
+        if (it.barEl) it.barEl.style.width = (it.done ? 100 : it.got / it.size * 100) + '%';
+    }
+    function drop(it) {
+        if (it.t) { const t = it.t; incoming.delete(t.id); t.parts = []; it.t = null; o.reply(t.conn, { k: 'nack', id: t.id, why: 'cancelled' }); }
+        if (it.url) { URL.revokeObjectURL(it.url); it.url = null; }
+        it.text = ''; it.parts = null;
+    }
+    function failTransfer(t, why) {
+        incoming.delete(t.id); t.parts = []; t.it.t = null; t.it.failed = why;
+        o.reply(t.conn, { k: 'nack', id: t.id, why }); render();
+    }
+
+    // Everything is hidden by default. "Show" reveals one item at a time; unticking the box reveals all.
+    function render() {
+        list.innerHTML = '';
+        empty.hidden = items.length > 0;
+        items.forEach((it) => {
+            const hide = mask.checked && !it.shown;
+            const li = document.createElement('li');
+            const foot = mk('div', { className: 'item-foot' });
+            foot.appendChild(mk('time', { textContent: new Date(it.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }));
+            if (it.file) {
+                const meta = mk('div', { className: 'file-meta' });
+                it.metaEl = meta; it.barEl = null;
+                li.append(mk('div', { className: 'file-name', textContent: hide ? '••••••••  (hidden file)' : it.name }), meta);
+                if (!it.done && !it.failed) {
+                    const mt = mk('div', { className: 'meter' });
+                    const b = document.createElement('i'); mt.appendChild(b); li.appendChild(mt); it.barEl = b;
+                }
+                paintFile(it);
+            } else {
+                li.appendChild(mk('pre', { textContent: hide ? '•'.repeat(Math.min(it.text.length, 24)) + '  (' + it.text.length + ' characters)' : it.text }));
+            }
+            if (mask.checked) foot.appendChild(mk('button', { className: 'btn', type: 'button', textContent: it.shown ? 'Hide' : 'Show', onclick: () => { it.shown = !it.shown; render(); } }));
+            if (it.file) {
+                if (it.done && it.url && !hide) foot.appendChild(mk('a', { className: 'btn primary', textContent: 'Download', href: it.url, download: it.name }));
+            } else {
+                const cp = mk('button', { className: 'btn primary', type: 'button', textContent: 'Copy' });
+                cp.onclick = async () => { const ok = await copyText(it.text); cp.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { cp.textContent = 'Copy'; }, 1500); };
+                foot.appendChild(cp);
+            }
+            foot.appendChild(mk('button', { className: 'btn', type: 'button', textContent: 'Delete', onclick: () => { drop(it); items = items.filter((x) => x !== it); render(); } }));
+            li.appendChild(foot); list.appendChild(li);
+        });
+    }
+
+    mask.onchange = () => { items.forEach((it) => { it.shown = false; }); render(); };
+    clear.onclick = () => { items.slice().forEach(drop); items = []; render(); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
+    // Received items expire by themselves.
+    setInterval(() => {
+        const ms = (+ttl.value || 0) * 60000;
+        if (!ms) return;
+        const now = Date.now(), dead = items.filter((it) => !it.t && now - it.at > ms);
+        if (dead.length) { dead.forEach(drop); items = items.filter((x) => !dead.includes(x)); render(); }
+    }, 5000);
+    render();
+
+    return {
+        async text(conn, m) {
+            if (!(await o.secure(conn))) { await o.reply(conn, { k: 'nack', id: m.id, why: 'insecure' }); return; }
+            o.accepted(conn);
+            if (!seen.has(m.id)) {
+                seen.add(m.id);
+                const it = { text: m.text.slice(0, CONFIG.maxChars), at: Date.now(), shown: false };
+                items.unshift(it); render();
+                if (auto && auto.checked) {
+                    const ok = await copyText(it.text);
+                    note(ok ? 'Copied to your clipboard.' : 'Received. Your browser blocked auto-copy, so press Copy.', !ok);
+                    setTimeout(() => note(''), 2500);
+                }
+                if (document.hidden) document.title = '● New text — Handoff';
+            }
+            await o.reply(conn, { k: 'ack', id: m.id });
+        },
+        async fileStart(conn, m) {
+            if (typeof m.id !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(m.id)) return;
+            const nack = (why) => o.reply(conn, { k: 'nack', id: m.id, why });
+            if (incoming.has(m.id) || seen.has(m.id)) return nack('duplicate');
+            if (!(await o.secure(conn))) return nack('insecure');
+            if (!Number.isSafeInteger(m.size) || m.size < 1 || m.size > CONFIG.maxFileBytes) return nack('size');
+            if (typeof m.name !== 'string' || m.n !== Math.ceil(m.size / CONFIG.chunk)) return nack('invalid');
+            if (incoming.size >= 3) return nack('busy');
+            o.accepted(conn);
+            const it = { file: true, name: safeName(m.name), size: m.size, got: 0, done: false, at: Date.now(), shown: false };
+            const t = { id: m.id, conn, it, parts: [], next: 0 };
+            it.t = t; incoming.set(m.id, t);
+            items.unshift(it); render();
+        },
+        chunk(conn, m) {
+            const t = incoming.get(m.id);
+            if (!t || t.conn !== conn) return;
+            const n = Math.ceil(t.it.size / CONFIG.chunk);
+            const want = m.i === n - 1 ? t.it.size - CONFIG.chunk * (n - 1) : CONFIG.chunk;
+            let bytes = null;
+            if (m.i === t.next && m.i < n && typeof m.d === 'string') { try { bytes = unb64u(m.d); } catch (e) { } }
+            if (!bytes || bytes.length !== want) return failTransfer(t, 'corrupt or out-of-order data');
+            t.parts.push(bytes); t.next++; t.it.got += bytes.length;
+            paintFile(t.it);
+        },
+        async fileEnd(conn, m) {
+            const t = incoming.get(m.id);
+            if (!t || t.conn !== conn) return;
+            const it = t.it, n = Math.ceil(it.size / CONFIG.chunk);
+            if (t.next !== n || it.got !== it.size) return failTransfer(t, 'incomplete');
+            incoming.delete(t.id);
+            it.url = URL.createObjectURL(new Blob(t.parts, { type: 'application/octet-stream' }));
+            it.done = true; it.t = null; t.parts = [];
+            seen.add(t.id);
+            render();
+            await o.reply(conn, { k: 'ack', id: t.id });
+            if (document.hidden) document.title = '● New file — Handoff';
+            note('Received a file. ' + (mask.checked ? 'Press Show, then Download to save it.' : 'Press Download to save it.') + ' Only open files you sent yourself.');
+            setTimeout(() => note(''), 6000);
+        },
+        failConn(conn) { incoming.forEach((t) => { if (t.conn === conn) failTransfer(t, 'connection lost'); }); },
+        wipe() { items.slice().forEach(drop); items = []; incoming.clear(); render(); }
+    };
+}
+
+// ---------------------------------------------------------------- shared: sending text and files
+function refusal(why) {
+    return { insecure: 'Other device: link not secure', size: 'Other device: file too large', busy: 'Other device busy, try again', cancelled: 'Cancelled on other device', duplicate: 'Other device: duplicate' }[why] || 'Refused by other device';
+}
+// o.link() returns { conn, sess } for the live connection (or null); o.verify(conn) runs the live security checks.
+function createOutbox(o) {
+    const pending = new Map();     // text id -> status element
+    const waiters = new Map();     // file id -> callback for the other device's ack or nack
+    let queue = Promise.resolve();
+
+    function logRow(label) {
+        const li = document.createElement('li');
+        const a = document.createElement('span'); a.textContent = label;
+        const st = document.createElement('span'); st.className = 'st';
+        li.append(a, st); o.list.prepend(li);
+        return st;
+    }
+    async function live() {
+        const l = o.link();
+        if (!l) return { err: 'none' };
+        if (!(await o.verify(l.conn))) return { err: 'blocked' };
+        const l2 = o.link();
+        return l2 && l2.conn === l.conn ? { l: l2 } : { err: 'none' };
+    }
+    async function sendText(text) {
+        if (!text.trim()) { note('Nothing to send.', true); return false; }
+        if (text.length > CONFIG.maxChars) { note('That’s over ' + CONFIG.maxChars + ' characters.', true); return false; }
+        const r = await live();
+        if (!r.l) { note(r.err === 'blocked' ? 'Blocked: this connection isn’t secure.' : 'Not connected yet.', true); return false; }
+        const id = b64u(rnd(12));
+        try { await r.l.sess.send(r.l.conn, { k: 'msg', id, text }); } catch (e) { note('Could not send. Check the connection.', true); return false; }
+        note('');
+        const st = logRow(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters');
+        st.textContent = 'Sending…'; pending.set(id, st);
+        setTimeout(() => { if (pending.has(id)) { pending.delete(id); st.className = 'st bad'; st.textContent = 'Not confirmed'; } }, 6000);
+        return true;
+    }
+
+    // Files are read in slices, so a large file never sits fully in memory.
+    async function sendFile(file) {
+        const st = logRow(file.name + ' · ' + fmtSize(file.size));
+        st.textContent = 'Waiting…';
+        const fail = (t) => { st.className = 'st bad'; st.textContent = t; };
+        if (file.size < 1) return fail('Empty file');
+        if (file.size > CONFIG.maxFileBytes) return fail('Over ' + fmtSize(CONFIG.maxFileBytes));
+        const r = await live();
+        if (!r.l) return fail(r.err === 'blocked' ? 'Blocked: not secure' : 'Not connected');
+        const c = r.l.conn, s = r.l.sess, id = b64u(rnd(12)), n = Math.ceil(file.size / CONFIG.chunk);
+        const alive = () => { const l = o.link(); return !!l && l.conn === c; };
+        let result = null;
+        waiters.set(id, (x) => { result = x; });
+        const put = (obj) => s.send(c, obj);
+        try {
+            await put({ k: 'file', id, name: file.name, size: file.size, n });
+            for (let i = 0; i < n && !result; i++) {
+                if (!alive()) { try { await put({ k: 'fend', id }); } catch (e) { } return fail('Interrupted'); }
+                while (c.open && !result && ((c.bufferSize || 0) > 4 || (c.dataChannel && c.dataChannel.bufferedAmount > 1048576))) await sleep(25);
+                const buf = await file.slice(i * CONFIG.chunk, (i + 1) * CONFIG.chunk).arrayBuffer();
+                await put({ k: 'chunk', id, i, d: b64u(buf) });
+                st.textContent = 'Sending ' + Math.floor((i + 1) / n * 100) + '%';
+            }
+            if (!result) {
+                await put({ k: 'fend', id });
+                for (let w = 0; w < 400 && !result && alive(); w++) await sleep(50);   // wait up to 20 s for the other device to confirm
+            }
+        } catch (e) { return fail('Could not send'); }
+        finally { waiters.delete(id); }
+        if (result && result.ok) { st.className = 'st ok'; st.textContent = 'Delivered'; }
+        else fail(result ? refusal(result.why) : 'Not confirmed');
+    }
+    function addFiles(list) {
+        const files = Array.from(list || []);
+        o.fileIn.value = '';
+        files.forEach((f) => { queue = queue.then(() => sendFile(f)).catch(() => { }); });
+    }
+
+    o.sendBtn.onclick = async () => { if (await sendText(o.box.value)) o.box.value = ''; };
+    o.box.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') o.sendBtn.click(); });
+    o.pickBtn.onclick = () => o.fileIn.click();
+    o.fileIn.onchange = () => addFiles(o.fileIn.files);
+
+    return {
+        sendText, addFiles,
+        enable(on) { o.sendBtn.disabled = o.pickBtn.disabled = !on; },
+        ack(id) {
+            if (pending.has(id)) { const el = pending.get(id); pending.delete(id); el.className = 'st ok'; el.textContent = 'Delivered'; }
+            else if (waiters.has(id)) waiters.get(id)({ ok: true });
+        },
+        nack(id, why) {
+            if (waiters.has(id)) waiters.get(id)({ ok: false, why });
+            else if (pending.has(id)) { const el = pending.get(id); pending.delete(id); el.className = 'st bad'; el.textContent = refusal(why); }
+        },
+        wipe() { o.box.value = ''; o.list.innerHTML = ''; pending.clear(); waiters.clear(); }
+    };
+}
+
 // ---------------------------------------------------------------- receiver (PC)
 async function startReceiver() {
     $('rx').hidden = false; $('tx').hidden = true;
@@ -367,15 +606,26 @@ async function startReceiver() {
     const authed = new Set();      // connections that proved they hold the session keys
     const conns = new Set();       // every open connection (authed or not)
     const cs = new WeakMap();      // connection -> handshake state
-    const seen = new Set();        // message ids already shown
-    const incoming = new Map();    // file id -> transfer in progress
-    let items = [];
     let peer = null, attempts = 0;
     let pr = null;                 // the current pairing: id, key pair, one-time secret
 
-    const autocopy = $('autocopy');
-    $('mask').onchange = render;
-    $('clear').onclick = () => { items.slice().forEach(drop); items = []; render(); };
+    // Everything received is hidden until you press Show.
+    const inbox = createInbox($('rx-inbox'), {
+        title: 'Received from phone', autocopy: true,
+        reply: (c, obj) => reply(c, obj),
+        secure: (c) => secure(c),
+        accepted: (c) => { authed.add(c); status(); }
+    });
+    // Send text and files back to the phone over the same encrypted connection.
+    const out = createOutbox({
+        box: $('pc-box'), sendBtn: $('pc-send'), pickBtn: $('pc-pick'), fileIn: $('pc-files'), list: $('pc-sent'),
+        link() {
+            const c = Array.from(authed).pop(), st = c && cs.get(c);
+            return st && st.sess && c.open ? { conn: c, sess: st.sess } : null;
+        },
+        verify: (c) => secure(c)
+    });
+    $('pc-limit').textContent = fmtSize(CONFIG.maxFileBytes);
 
     async function showPairing() {
         const pair = await newPair(), ps = rnd(16);
@@ -392,75 +642,17 @@ async function startReceiver() {
     }
 
     function status() {
-        if (authed.size) setHead('Phone connected', 'Send text or files from your phone. They show up here.');
+        if (authed.size) setHead('Phone connected', 'Send text or files either way. Received items stay hidden until you press Show.');
         else if (pr.done) setHead('Phone disconnected', 'It reconnects by itself while its page stays open. If you closed that page, make a new pairing code.');
         else setHead('Waiting for your phone', 'Scan the code. It works once, then it’s used up.');
         $('pairbox').hidden = pr.done; $('repair').hidden = !pr.done;
+        $('rx-send').hidden = !authed.size; out.enable(authed.size > 0);
     }
 
     function burnCode() {                     // the pairing code has done its job: remove every trace of it from the page
         pr.salts = [pr.rs]; pr.done = true;
         $('link').value = ''; $('qr').innerHTML = '';
         status();
-    }
-
-    function paintFile(it) {
-        if (it.metaEl) it.metaEl.textContent = it.failed ? 'Failed: ' + it.failed : fmtSize(it.size) + (it.done ? '' : ' · receiving ' + Math.floor(it.got / it.size * 100) + '%');
-        if (it.barEl) it.barEl.style.width = (it.done ? 100 : it.got / it.size * 100) + '%';
-    }
-    function drop(it) {
-        if (it.t) { const t = it.t; incoming.delete(t.id); t.parts = []; it.t = null; reply(t.conn, { k: 'nack', id: t.id, why: 'cancelled' }); }
-        if (it.url) { URL.revokeObjectURL(it.url); it.url = null; }
-        it.text = ''; it.parts = null;
-    }
-    function failTransfer(t, why) {
-        incoming.delete(t.id); t.parts = []; t.it.t = null; t.it.failed = why;
-        reply(t.conn, { k: 'nack', id: t.id, why }); render();
-    }
-
-    function render() {
-        const list = $('feed'); list.innerHTML = '';
-        $('feed-empty').hidden = items.length > 0;
-        const masked = $('mask').checked;
-        items.forEach((it) => {
-            const li = document.createElement('li');
-            const foot = document.createElement('div'); foot.className = 'item-foot';
-            const t = document.createElement('time'); t.textContent = new Date(it.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            foot.appendChild(t);
-            if (it.file) {
-                const nm = document.createElement('div'); nm.className = 'file-name'; nm.textContent = it.name;
-                const meta = document.createElement('div'); meta.className = 'file-meta';
-                it.metaEl = meta; it.barEl = null;
-                li.append(nm, meta);
-                if (!it.done && !it.failed) {
-                    const mt = document.createElement('div'); mt.className = 'meter';
-                    const bar = document.createElement('i'); mt.appendChild(bar); li.appendChild(mt); it.barEl = bar;
-                }
-                paintFile(it);
-                if (it.done && it.url) {
-                    const dl = document.createElement('a'); dl.className = 'btn primary'; dl.textContent = 'Download'; dl.href = it.url; dl.download = it.name;
-                    foot.appendChild(dl);
-                }
-            } else {
-                const pre = document.createElement('pre');
-                let shown = !masked;
-                const paint = () => { pre.textContent = shown ? it.text : '•'.repeat(Math.min(it.text.length, 24)) + '  (' + it.text.length + ' characters)'; };
-                paint();
-                li.appendChild(pre);
-                if (masked) {
-                    const rev = document.createElement('button'); rev.className = 'btn'; rev.type = 'button'; rev.textContent = 'Show';
-                    rev.onclick = () => { shown = !shown; rev.textContent = shown ? 'Hide' : 'Show'; paint(); };
-                    foot.appendChild(rev);
-                }
-                const cp = document.createElement('button'); cp.className = 'btn primary'; cp.type = 'button'; cp.textContent = 'Copy';
-                cp.onclick = async () => { const ok = await copyText(it.text); cp.textContent = ok ? 'Copied' : 'Select and copy'; setTimeout(() => { cp.textContent = 'Copy'; }, 1500); };
-                foot.appendChild(cp);
-            }
-            const del = document.createElement('button'); del.className = 'btn'; del.type = 'button'; del.textContent = 'Delete';
-            del.onclick = () => { drop(it); items = items.filter(x => x !== it); render(); };
-            foot.appendChild(del);
-            li.appendChild(foot); list.appendChild(li);
-        });
     }
 
     async function reply(conn, obj) {
@@ -475,49 +667,6 @@ async function startReceiver() {
         const r = await checkLink(conn, peer, true, st && st.sess && st.sess.sas);   // a frame only gets here if it decrypted with this session's keys
         renderSec(r);
         return r.ok;
-    }
-
-    async function onFileStart(conn, m) {
-        if (typeof m.id !== 'string' || !/^[A-Za-z0-9_-]{16}$/.test(m.id)) return;
-        const nack = (why) => reply(conn, { k: 'nack', id: m.id, why });
-        if (incoming.has(m.id) || seen.has(m.id)) return nack('duplicate');
-        if (!(await secure(conn))) return nack('insecure');
-        if (!Number.isSafeInteger(m.size) || m.size < 1 || m.size > CONFIG.maxFileBytes) return nack('size');
-        if (typeof m.name !== 'string' || m.n !== Math.ceil(m.size / CONFIG.chunk)) return nack('invalid');
-        if (incoming.size >= 3) return nack('busy');
-        authed.add(conn);
-        const it = { file: true, name: safeName(m.name), size: m.size, got: 0, done: false, at: Date.now() };
-        const t = { id: m.id, conn, it, parts: [], next: 0 };
-        it.t = t; incoming.set(m.id, t);
-        items.unshift(it); render(); status();
-    }
-
-    async function onChunk(conn, m) {
-        const t = incoming.get(m.id);
-        if (!t || t.conn !== conn) return;
-        const n = Math.ceil(t.it.size / CONFIG.chunk);
-        const want = m.i === n - 1 ? t.it.size - CONFIG.chunk * (n - 1) : CONFIG.chunk;
-        let bytes = null;
-        if (m.i === t.next && m.i < n && typeof m.d === 'string') { try { bytes = unb64u(m.d); } catch (e) { } }
-        if (!bytes || bytes.length !== want) return failTransfer(t, 'corrupt or out-of-order data');
-        t.parts.push(bytes); t.next++; t.it.got += bytes.length;
-        paintFile(t.it);
-    }
-
-    async function onFileEnd(conn, m) {
-        const t = incoming.get(m.id);
-        if (!t || t.conn !== conn) return;
-        const it = t.it, n = Math.ceil(it.size / CONFIG.chunk);
-        if (t.next !== n || it.got !== it.size) return failTransfer(t, 'incomplete');
-        incoming.delete(t.id);
-        it.url = URL.createObjectURL(new Blob(t.parts, { type: 'application/octet-stream' }));
-        it.done = true; it.t = null; t.parts = [];
-        seen.add(t.id);
-        render();
-        await reply(conn, { k: 'ack', id: t.id });
-        if (document.hidden) document.title = '● New file — Handoff';
-        note('Received ' + it.name + '. Press Download to save it. Only open files you sent yourself.');
-        setTimeout(() => note(''), 5000);
     }
 
     async function onMsg(conn, m) {
@@ -535,27 +684,12 @@ async function startReceiver() {
             status(); return;
         }
         if (m.k === 'rsok') { if (authed.has(conn) && pr.rs && !pr.done) burnCode(); return; }
-        if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') {
-            if (!(await secure(conn))) { await reply(conn, { k: 'nack', id: m.id, why: 'insecure' }); return; }
-            authed.add(conn);
-            if (!seen.has(m.id)) {
-                seen.add(m.id);
-                const it = { text: m.text.slice(0, CONFIG.maxChars), at: Date.now() };
-                items.unshift(it); render();
-                if (autocopy.checked) {
-                    const ok = await copyText(it.text);
-                    note(ok ? 'Copied to your clipboard.' : 'Received. Your browser blocked auto-copy, so press Copy.', !ok);
-                    setTimeout(() => note(''), 2500);
-                }
-                if (document.hidden) document.title = '● New text — Handoff';
-            }
-            await reply(conn, { k: 'ack', id: m.id });
-            status();
-            return;
-        }
-        if (m.k === 'file') return onFileStart(conn, m);
-        if (m.k === 'chunk') return onChunk(conn, m);
-        if (m.k === 'fend') return onFileEnd(conn, m);
+        if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') return inbox.text(conn, m);
+        if (m.k === 'file') return inbox.fileStart(conn, m);
+        if (m.k === 'chunk') return inbox.chunk(conn, m);
+        if (m.k === 'fend') return inbox.fileEnd(conn, m);
+        if (m.k === 'ack' && typeof m.id === 'string') { if (authed.has(conn)) out.ack(m.id); return; }
+        if (m.k === 'nack' && typeof m.id === 'string') { if (authed.has(conn)) out.nack(m.id, m.why); return; }
     }
 
     // Frames arrive strictly in order. The first is the phone's one-off public key (plain), the rest are sealed.
@@ -604,7 +738,7 @@ async function startReceiver() {
             });
             conn.on('close', () => {
                 conns.delete(conn); authed.delete(conn); cs.delete(conn);
-                incoming.forEach((t) => { if (t.conn === conn) failTransfer(t, 'connection lost'); });
+                inbox.failConn(conn);
                 if (!authed.size) renderSec(null);
                 status();
             });
@@ -631,19 +765,18 @@ async function startReceiver() {
 
     document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
 
-    // Received items expire by themselves.
-    setInterval(() => {
-        const ms = (+$('ttl').value || 0) * 60000;
-        if (!ms) return;
-        const now = Date.now(), dead = items.filter((it) => !it.t && now - it.at > ms);
-        if (dead.length) { dead.forEach(drop); items = items.filter((x) => !dead.includes(x)); render(); }
-    }, 5000);
-
     // Leaving the page wipes everything held in memory.
-    window.addEventListener('pagehide', () => { items.slice().forEach(drop); items = []; try { if (peer) peer.destroy(); } catch (e) { } });
+    window.addEventListener('pagehide', () => { inbox.wipe(); out.wipe(); try { if (peer) peer.destroy(); } catch (e) { } });
+
+    document.addEventListener('dragover', (e) => { e.preventDefault(); if (authed.size) document.body.classList.add('dragging'); });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+    document.addEventListener('drop', (e) => {
+        e.preventDefault(); document.body.classList.remove('dragging');
+        if (authed.size && e.dataTransfer && e.dataTransfer.files.length) out.addFiles(e.dataTransfer.files);
+    });
 
     await showPairing();
-    status(); render(); open();
+    status(); open();
 }
 
 // ---------------------------------------------------------------- sender (phone)
@@ -658,15 +791,25 @@ async function startSender(tx) {
 
     let peer = null, conn = null, sess = null, retryTimer = null, retryN = 0, helloTimer = null, closed = false;
     let e2e = false, secureOK = false, ready = false, queue = Promise.resolve();
-    const pending = new Map();     // text id -> status element
-    const waiters = new Map();     // file id -> callback for the PC's ack or nack
+    // Anything the PC sends back is hidden until you press Show.
+    const inbox = createInbox($('tx-inbox'), {
+        title: 'Received from PC',
+        reply: async (cn, obj) => { if (cn !== conn || !sess) return; try { await sess.send(cn, obj); } catch (e) { } },
+        secure: () => verify(),
+        accepted: () => { }
+    });
+    const out = createOutbox({
+        box, sendBtn, pickBtn, fileIn, list: sentList,
+        link: () => (ready && conn && sess ? { conn, sess } : null),
+        verify: () => verify()
+    });
 
     // Sending is only possible when the PC proved it holds the session keys AND every live security check passes.
     function refresh() {
         const was = ready;
         ready = e2e && secureOK;
-        sendBtn.disabled = pasteBtn.disabled = pickBtn.disabled = !ready;
-        if (ready && !was) { setHead('Ready', 'Send text or files. They land on your PC.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
+        out.enable(ready); pasteBtn.disabled = !ready;
+        if (ready && !was) { setHead('Ready', 'Send text or files to your PC. Anything it sends back appears below, hidden until you press Show.'); setNet('ok', 'Connected'); note(''); retryN = 0; }
         else if (e2e && !secureOK) { setHead('Not secure', 'Sending is blocked until every security check passes.'); setNet('bad', 'Blocked'); }
     }
     function lost() { e2e = false; secureOK = false; sess = null; refresh(); renderSec(null); }
@@ -687,7 +830,7 @@ async function startSender(tx) {
         clearTimeout(retryTimer); clearTimeout(helloTimer);
         if (!peer || peer.destroyed) return connect();
         if (!peer.open) return;                                        // 'open' handler will dial
-        if (conn) { const old = conn; conn = null; try { old.close(); } catch (e) { } }
+        if (conn) { const old = conn; conn = null; inbox.failConn(old); try { old.close(); } catch (e) { } }
         lost();
         const c = conn = peer.connect(tx.id, { reliable: true });
         let s = null, chain = Promise.resolve();
@@ -708,12 +851,18 @@ async function startSender(tx) {
             } else if (m.k === 'refuse') {
                 clearTimeout(helloTimer); e2e = false; secureOK = false; refresh();
                 setHead('Not secure', 'Your PC reports that this connection isn’t secure, so nothing is sent.'); setNet('bad', 'Blocked');
-            } else if (m.k === 'ack') {
-                if (pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st ok'; el.textContent = 'Delivered'; }
-                else if (waiters.has(m.id)) waiters.get(m.id)({ ok: true });
-            } else if (m.k === 'nack') {
-                if (waiters.has(m.id)) waiters.get(m.id)({ ok: false, why: m.why });
-                else if (pending.has(m.id)) { const el = pending.get(m.id); pending.delete(m.id); el.className = 'st bad'; el.textContent = refusal(m.why); }
+            } else if (m.k === 'ack' && typeof m.id === 'string') {
+                out.ack(m.id);
+            } else if (m.k === 'nack' && typeof m.id === 'string') {
+                out.nack(m.id, m.why);
+            } else if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') {
+                await inbox.text(c, m);
+            } else if (m.k === 'file') {
+                await inbox.fileStart(c, m);
+            } else if (m.k === 'chunk') {
+                inbox.chunk(c, m);
+            } else if (m.k === 'fend') {
+                await inbox.fileEnd(c, m);
             }
         }
 
@@ -734,7 +883,7 @@ async function startSender(tx) {
             }, 5000);
         });
         c.on('data', (d) => { chain = chain.then(() => onData(d)).catch(() => { }); });
-        c.on('close', () => { if (conn !== c) return; conn = null; lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
+        c.on('close', () => { if (conn !== c) return; inbox.failConn(c); conn = null; lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
         c.on('error', () => { });
     }
     function connect() {
@@ -753,93 +902,27 @@ async function startSender(tx) {
         });
     }
 
-    function refusal(why) {
-        return { insecure: 'PC: link not secure', size: 'PC: file too large', busy: 'PC busy, try again', cancelled: 'Cancelled on PC', duplicate: 'PC: duplicate' }[why] || 'Refused by PC';
-    }
-    function logRow(label) {
-        const li = document.createElement('li');
-        const a = document.createElement('span'); a.textContent = label;
-        const st = document.createElement('span'); st.className = 'st';
-        li.append(a, st); sentList.prepend(li);
-        return st;
-    }
-
-    async function send(text) {
-        if (!ready || !conn || !sess) { note('Not connected yet.', true); return false; }
-        if (!text.trim()) { note('Nothing to send.', true); return false; }
-        if (text.length > CONFIG.maxChars) { note('That’s over ' + CONFIG.maxChars + ' characters.', true); return false; }
-        if (!(await verify()) || !conn || !sess) { note('Blocked: this connection isn’t secure.', true); return false; }
-        const id = b64u(rnd(12));
-        try { await sess.send(conn, { k: 'msg', id, text }); } catch (e) { note('Could not send. Check the connection.', true); return false; }
-        note('');
-        const st = logRow(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · ' + text.length + ' characters');
-        st.textContent = 'Sending…'; pending.set(id, st);
-        setTimeout(() => { if (pending.has(id)) { pending.delete(id); st.className = 'st bad'; st.textContent = 'Not confirmed'; } }, 6000);
-        return true;
-    }
-
-    // Files are read in slices, so a large file never sits fully in this phone's memory.
-    async function sendFile(file) {
-        const st = logRow(file.name + ' · ' + fmtSize(file.size));
-        st.textContent = 'Waiting…';
-        const fail = (t) => { st.className = 'st bad'; st.textContent = t; };
-        if (file.size < 1) return fail('Empty file');
-        if (file.size > CONFIG.maxFileBytes) return fail('Over ' + fmtSize(CONFIG.maxFileBytes));
-        if (!ready || !conn || !sess) return fail('Not connected');
-        if (!(await verify()) || !conn || !sess) return fail('Blocked: not secure');
-        const c = conn, s = sess, id = b64u(rnd(12)), n = Math.ceil(file.size / CONFIG.chunk);
-        let result = null;
-        waiters.set(id, (r) => { result = r; });
-        const put = (obj) => s.send(c, obj);
-        try {
-            await put({ k: 'file', id, name: file.name, size: file.size, n });
-            for (let i = 0; i < n && !result; i++) {
-                if (conn !== c || !ready) { try { await put({ k: 'fend', id }); } catch (e) { } return fail('Interrupted'); }
-                while (c.open && !result && ((c.bufferSize || 0) > 4 || (c.dataChannel && c.dataChannel.bufferedAmount > 1048576))) await sleep(25);
-                const buf = await file.slice(i * CONFIG.chunk, (i + 1) * CONFIG.chunk).arrayBuffer();
-                await put({ k: 'chunk', id, i, d: b64u(buf) });
-                st.textContent = 'Sending ' + Math.floor((i + 1) / n * 100) + '%';
-            }
-            if (!result) {
-                await put({ k: 'fend', id });
-                for (let w = 0; w < 400 && !result && conn === c; w++) await sleep(50);   // wait up to 20 s for the PC to confirm
-            }
-        } catch (e) { return fail('Could not send'); }
-        finally { waiters.delete(id); }
-        if (result && result.ok) { st.className = 'st ok'; st.textContent = 'Delivered'; }
-        else fail(result ? refusal(result.why) : 'Not confirmed');
-    }
-    function addFiles(list) {
-        const files = Array.from(list || []);
-        fileIn.value = '';
-        files.forEach((f) => { queue = queue.then(() => sendFile(f)).catch(() => { }); });
-    }
-
     // Drops the connection and everything held in memory.
     function wipe() {
         closed = true; clearTimeout(retryTimer); clearTimeout(helloTimer);
         salt = null; sess = null; e2e = false; secureOK = false; ready = false;
-        box.value = ''; sentList.innerHTML = ''; pending.clear(); waiters.clear();
+        out.wipe(); inbox.wipe();
         const c = conn, p = peer; conn = null; peer = null;
         try { if (c) c.close(); } catch (e) { }
         try { if (p) p.destroy(); } catch (e) { }
     }
 
-    sendBtn.onclick = async () => { if (await send(box.value)) { box.value = ''; } };
-    box.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBtn.click(); });
     pasteBtn.onclick = async () => {
         try {
             const t = await navigator.clipboard.readText();
-            if (await send(t)) box.value = '';
+            if (await out.sendText(t)) box.value = '';
         } catch (e) { note('Your browser blocked clipboard access. Paste into the box, then tap Send.', true); box.focus(); }
     };
-    pickBtn.onclick = () => fileIn.click();
-    fileIn.onchange = () => addFiles(fileIn.files);
     document.addEventListener('dragover', (e) => { e.preventDefault(); if (ready) document.body.classList.add('dragging'); });
     document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
     document.addEventListener('drop', (e) => {
         e.preventDefault(); document.body.classList.remove('dragging');
-        if (ready && e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+        if (ready && e.dataTransfer && e.dataTransfer.files.length) out.addFiles(e.dataTransfer.files);
     });
     $('forget').onclick = () => {
         if (!confirm('Disconnect and wipe this page? To send again you’ll need to scan a new pairing code.')) return;
