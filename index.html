@@ -179,7 +179,11 @@ const CONFIG = {
     peer: {},                         // {} = free PeerJS cloud. Self-hosted: { host: 'peer.example.com', port: 443, path: '/', secure: true }
     ice: [                            // add a TURN server here if your phone can't reach your PC on mobile data
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
+        { urls: 'stun:global.stun.twilio.com:3478' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' }
+        // For mobile data / strict networks, a TURN relay makes links far more stable. Still end-to-end encrypted:
+        // { urls: 'turn:YOUR_TURN_HOST:443?transport=tcp', username: '...', credential: '...' }
     ],
     maxChars: 20000,                  // per text message
     maxFileBytes: 100 * 1024 * 1024,  // per file (the PC holds the whole file in memory until you download it)
@@ -283,6 +287,7 @@ const baseUrl = () => location.href.split('#')[0];
 const fmtSize = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB' : (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + ' MB';
 const safeName = (s) => String(s).replace(/[\u0000-\u001f\u007f<>:"\/\\|?*]+/g, '_').replace(/^[.\s]+|[\s.]+$/g, '').slice(0, 120) || 'file';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let resumeHook = null;     // set by the sending page so a restored page reconnects instead of reloading
 
 // Reports what this page can verify about the live connection. Anything it can't confirm counts as a failure.
 async function checkLink(conn, peer, e2e, sas) {
@@ -672,9 +677,12 @@ async function startReceiver() {
     async function onMsg(conn, m) {
         if (!m || typeof m !== 'object') return;
         const st = cs.get(conn);
+        if (m.k === 'ping') { if (authed.has(conn)) await reply(conn, { k: 'pong' }); return; }
         if (m.k === 'hi') {
             if (!(await secure(conn))) { authed.delete(conn); await reply(conn, { k: 'refuse' }); status(); return; }
-            authed.add(conn); await reply(conn, { k: 'hi' });
+            authed.add(conn);
+            conns.forEach((x) => { if (x !== conn && authed.has(x)) { authed.delete(x); try { x.close(); } catch (e) { } } });   // the phone came back: drop its stale link
+            await reply(conn, { k: 'hi' });
             if (!pr.done) {
                 if (st.viaPs) {                   // first use of the pairing code: hand over a reconnect secret
                     if (!pr.rs) { pr.rs = rnd(16); pr.salts = [pr.rs, pr.ps]; }
@@ -725,7 +733,10 @@ async function startReceiver() {
         const p = peer = new Peer(mine.id, peerOptions());
         p.on('open', () => { if (peer !== p) return; attempts = 0; setNet('ok', 'Online'); status(); });
         p.on('connection', (conn) => {
-            if (pr !== mine || conns.size >= 4) { try { conn.close(); } catch (e) { } return; }
+            conns.forEach((x) => {      // forget connections that died without telling us (phone slept or lost signal)
+                if (!x.open && (authed.has(x) || !x.peerConnection || ['failed', 'closed', 'disconnected'].includes(x.peerConnection.connectionState))) { conns.delete(x); authed.delete(x); try { x.close(); } catch (e) { } }
+            });
+            if (pr !== mine || conns.size >= 6) { try { conn.close(); } catch (e) { } return; }
             conns.add(conn);
             const st = { sess: null, bits: null, phonePub: null, viaPs: false, bad: 0 };
             cs.set(conn, st);
@@ -744,7 +755,13 @@ async function startReceiver() {
             });
             conn.on('error', () => { });
         });
-        p.on('disconnected', () => { if (peer !== p || p.destroyed) return; setNet('bad', 'Reconnecting'); try { p.reconnect(); } catch (e) { } });
+        let looping = false;
+        const again = () => {
+            if (peer !== p || p.destroyed || !p.disconnected) { looping = false; return; }
+            looping = true; try { p.reconnect(); } catch (e) { }
+            setTimeout(again, 4000);
+        };
+        p.on('disconnected', () => { if (peer !== p || p.destroyed) return; setNet('bad', 'Reconnecting'); if (!looping) again(); });
         p.on('error', (e) => {
             if (peer !== p) return;
             if (e.type === 'unavailable-id') {
@@ -752,6 +769,7 @@ async function startReceiver() {
                 else fatal('Handoff is already open in another tab or window on this device. Close it and reload.');
             } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
                 setNet('bad', 'Offline');
+                if (p.disconnected && !looping) again();
             }
         });
     }
@@ -764,6 +782,7 @@ async function startReceiver() {
     $('rotate').onclick = rotate; $('repair').onclick = rotate;
 
     document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
+    window.addEventListener('online', () => { if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) { } } });
 
     // Leaving the page wipes everything held in memory.
     window.addEventListener('pagehide', () => { inbox.wipe(); out.wipe(); try { if (peer) peer.destroy(); } catch (e) { } });
@@ -790,6 +809,7 @@ async function startSender(tx) {
     const box = $('box'), sendBtn = $('send'), pasteBtn = $('paste'), pickBtn = $('pick'), fileIn = $('files'), sentList = $('sent');
 
     let peer = null, conn = null, sess = null, retryTimer = null, retryN = 0, helloTimer = null, closed = false;
+    let connTimer = null, openTimer = null, lastRx = Date.now();
     let e2e = false, secureOK = false, ready = false, queue = Promise.resolve();
     // Anything the PC sends back is hidden until you press Show.
     const inbox = createInbox($('tx-inbox'), {
@@ -825,20 +845,44 @@ async function startSender(tx) {
         retryN++;
         retryTimer = setTimeout(dial, delay || Math.min(1000 * retryN, 8000));
     }
+    // Throws away the whole link (data channel AND signaling socket, which is often dead after sleep) and starts fresh.
+    function relink() {
+        if (closed) return;
+        clearTimeout(connTimer); clearTimeout(openTimer); clearTimeout(helloTimer);
+        const c = conn; conn = null;
+        if (c) { inbox.failConn(c); try { c.close(); } catch (e) { } }
+        lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting');
+        const p = peer; peer = null;
+        if (p) { try { p.destroy(); } catch (e) { } }
+        retryN = 0; clearTimeout(retryTimer); retryTimer = setTimeout(dial, 300);
+    }
+    // Called whenever the phone wakes up or the network changes: is the link really alive?
+    function probe() {
+        if (closed) return;
+        if (!conn) { retryN = 0; dial(); return; }
+        if (!ready || !sess) return;
+        const stamp = lastRx;
+        sess.send(conn, { k: 'ping' }).catch(() => relink());
+        setTimeout(() => { if (!closed && conn && lastRx === stamp) relink(); }, 3500);
+    }
+    resumeHook = () => relink();
+
     function dial() {
         if (closed) return;
         clearTimeout(retryTimer); clearTimeout(helloTimer);
         if (!peer || peer.destroyed) return connect();
-        if (!peer.open) return;                                        // 'open' handler will dial
+        if (!peer.open) { try { if (peer.disconnected) peer.reconnect(); } catch (e) { } retry(2500); return; }                                        // 'open' handler will dial
         if (conn) { const old = conn; conn = null; inbox.failConn(old); try { old.close(); } catch (e) { } }
         lost();
         const c = conn = peer.connect(tx.id, { reliable: true });
+        clearTimeout(connTimer); connTimer = setTimeout(() => { if (conn === c && !c.open) relink(); }, 12000);
         let s = null, chain = Promise.resolve();
 
         async function onData(d) {
             if (conn !== c || !s) return;
             let m; try { m = await s.open(d); } catch (e) { return; }
             if (conn !== c) return;
+            lastRx = Date.now();
             if (m.k === 'hi') {
                 clearTimeout(helloTimer); e2e = true;
                 if (await verify()) note('');
@@ -868,6 +912,7 @@ async function startSender(tx) {
 
         c.on('open', async () => {
             if (conn !== c) return;
+            clearTimeout(connTimer); lastRx = Date.now();
             try {
                 // A new one-off key pair for every connection.
                 const pair = await newPair(), mine = await exportPub(pair);
@@ -889,8 +934,13 @@ async function startSender(tx) {
     function connect() {
         if (closed) return;
         const p = peer = new Peer(undefined, peerOptions());
-        p.on('open', () => { if (peer === p) dial(); });
-        p.on('disconnected', () => { if (peer !== p || p.destroyed) return; try { p.reconnect(); } catch (e) { } });
+        clearTimeout(openTimer); openTimer = setTimeout(() => { if (peer === p && !p.open) relink(); }, 12000);
+        p.on('open', () => { if (peer === p) { clearTimeout(openTimer); dial(); } });
+        p.on('disconnected', () => {
+            if (peer !== p || p.destroyed) return;
+            try { p.reconnect(); } catch (e) { }
+            setTimeout(() => { if (peer === p && !p.destroyed && p.disconnected && !conn) relink(); }, 8000);
+        });
         p.on('error', (e) => {
             if (peer !== p) return;
             if (e.type === 'peer-unavailable') {
@@ -930,9 +980,20 @@ async function startSender(tx) {
         $('tx').hidden = true; $('forget').hidden = true; renderSec(null); note('');
         setHead('Disconnected', 'Nothing is stored on this device. Scan a new pairing code from your PC to connect again.'); setNet('', 'Closed');
     };
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && !ready && !closed) { retryN = 0; dial(); } });
-    window.addEventListener('pagehide', wipe);
+    // Waking the phone, switching back to the tab or regaining signal re-checks the link right away.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) probe(); });
+    document.addEventListener('resume', probe);
+    window.addEventListener('focus', probe);
+    window.addEventListener('online', probe);
+    // Only a real unload wipes the page. Being put to sleep or into the back/forward cache must not throw the keys away.
+    window.addEventListener('pagehide', (e) => { if (!e.persisted) wipe(); });
     setInterval(() => { if (conn && e2e) verify(); }, 10000);   // keep re-checking while connected
+    // Heartbeat: notice a link that died silently (screen off, signal lost) and rebuild it.
+    setInterval(() => {
+        if (closed || !conn || !e2e || !sess) return;
+        if (Date.now() - lastRx > 20000) { relink(); return; }
+        sess.send(conn, { k: 'ping' }).catch(() => { });
+    }, 5000);
     connect();
 }
 
@@ -940,8 +1001,9 @@ async function startSender(tx) {
 async function boot() {
     if (!window.crypto || !crypto.subtle) { fatal('Your browser only allows encryption on HTTPS pages (or localhost). Open this page over HTTPS.'); return; }
     if (typeof Peer === 'undefined') { fatal('The connection library didn’t load. Check your network and reload.'); return; }
-    // A page restored from the back/forward cache has lost its connection and keys, so start clean.
-    window.addEventListener('pageshow', (e) => { if (e.persisted) location.reload(); });
+    // A page restored from the back/forward cache has lost its connection. The phone reconnects with the keys it still holds;
+    // the PC page starts clean.
+    window.addEventListener('pageshow', (e) => { if (e.persisted) { if (resumeHook) resumeHook(); else location.reload(); } });
 
     // Opening a pairing link makes this device the sender. The link is read once, kept only in memory, and removed from the address bar.
     const hash = location.hash;
