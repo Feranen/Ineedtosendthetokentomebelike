@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex">
-<!-- Only the PeerJS signaling server and the two script CDNs are reachable. If you self-host PeerJS, add your host to connect-src. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data:; connect-src https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'">
+<!-- Only the PeerJS signaling server and the two script CDNs are reachable. If you self-host PeerJS, add your host to connect-src.
+     The inline script is pinned by its SHA-256 hash. If you edit the script, the page will refuse to run until you replace the hash below
+     with the one the browser console prints in the blocked-script error. 'unsafe-inline' is only a fallback for very old browsers, which ignore hashes. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-3Ebd4pb2TrZgDlb6FOrGlgZi+knYlA4pVyZL4w7TceA=' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'unsafe-inline'; img-src data:; connect-src https://0.peerjs.com wss://0.peerjs.com; base-uri 'none'; form-action 'none'">
 <title>Handoff</title>
 <style>
 :root {
@@ -191,7 +193,7 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
     </section>
 
     <footer>
-        <p>Nothing is saved on either device: no cookies, no local storage, no history of what you send. Everything lives in memory and is wiped when you close or leave this page. Each session creates fresh one-time ECDH P-256 key pairs, and the pairing code is used up the first time a phone connects. Either device can send text and files to the other, and anything received stays hidden until you press Show. Text and files are sealed with AES-256-GCM using keys only your two devices can derive, so someone who can read the HTTPS traffic to the pairing server still can’t read your data. Before anything is sent, both devices check TLS, DTLS and the key exchange. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other.</p>
+        <p>Nothing is saved on either device: no cookies, no local storage, no history of what you send. Everything lives in memory and is wiped when you close or leave this page. Your PC creates a fresh ECDH P-256 key pair for every pairing code and your phone creates a new one for every connection, and the pairing code is used up the first time a phone connects. Either device can send text and files to the other, and anything received stays hidden until you press Show. Text and files are sealed with AES-256-GCM using keys only your two devices can derive, so someone who can read the HTTPS traffic to the pairing server still can’t read your data. Before anything is sent, both devices check TLS, DTLS and the key exchange. If any check fails, transfers are blocked. The PeerJS server only helps the devices find each other.</p>
         <div class="row">
             <button id="rotate" class="btn quiet" type="button" hidden>New pairing code</button>
             <button id="forget" class="btn quiet" type="button" hidden>Disconnect and wipe</button>
@@ -251,7 +253,7 @@ const cat = (...a) => {
     return o;
 };
 
-// Key pairs are created per session and per connection. Private keys are non-extractable and never leave memory.
+// The PC creates one key pair per pairing code, the phone a new one for every connection. Private keys are non-extractable and never leave memory.
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
 const AAD = enc('handoff/v2');
 const newPair = () => crypto.subtle.generateKey(ECDH, false, ['deriveBits']);
@@ -548,7 +550,8 @@ function createInbox(container, o) {
 
 // ---------------------------------------------------------------- shared: sending text and files
 function refusal(why) {
-    return { insecure: 'Other device: link not secure', size: 'Other device: file too large', busy: 'Other device busy, try again', cancelled: 'Cancelled on other device', duplicate: 'Other device: duplicate' }[why] || 'Refused by other device';
+    const T = { insecure: 'Other device: link not secure', size: 'Other device: file too large', busy: 'Other device busy, try again', cancelled: 'Cancelled on other device', duplicate: 'Other device: duplicate' };
+    return (typeof why === 'string' && Object.prototype.hasOwnProperty.call(T, why) && T[why]) || 'Refused by other device';
 }
 // o.link() returns { conn, sess } for the live connection (or null); o.verify(conn) runs the live security checks.
 function createOutbox(o) {
@@ -712,7 +715,7 @@ async function runChecks() {
         const pair = await newPair(); sealed = pair.privateKey.extractable === false;
         try { await crypto.subtle.exportKey('pkcs8', pair.privateKey); sealed = false; } catch (e) { }
     } catch (e) { }
-    add(sealed ? 'ok' : 'bad', 'Private keys can’t be exported', sealed ? 'Non-extractable, new pair per session and per connection' : 'Key export was possible');
+    add(sealed ? 'ok' : 'bad', 'Private keys can’t be exported', sealed ? 'Non-extractable. PC: one pair per pairing code. Phone: one per connection' : 'Key export was possible');
 
     // 4. Content Security Policy: present, strict, and actually enforced
     const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]'), csp = meta ? meta.content : '';
@@ -720,6 +723,15 @@ async function runChecks() {
     const cs = (csp.match(/connect-src ([^;]*)/) || [])[1] || '';
     const wide = /(^|\s)(\*|https:|wss:|http:|ws:)(\s|$)/.test(cs);
     add(csp && !miss.length && cs && !wide ? 'ok' : 'bad', 'Strict content policy', csp ? (miss.length ? 'Missing: ' + miss.join(', ') : wide ? 'connect-src is too broad: ' + cs : 'Network access limited to: ' + cs) : 'No policy found');
+    const sm = csp.match(/script-src[^;]*'sha256-([A-Za-z0-9+\/=]+)'/);
+    let pinned = false;
+    if (sm) {
+        try {
+            const code = Array.from(document.scripts).filter((x) => !x.src).map((x) => x.textContent).join('');
+            pinned = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256', enc(code))))) === sm[1];
+        } catch (e) { }
+    }
+    add(pinned ? 'ok' : sm ? 'bad' : 'warn', 'Page code pinned by hash', pinned ? 'The running script matches the hash in the policy, so injected scripts are refused' : sm ? 'The script does not match the pinned hash' : 'No hash in the policy: any inline script would be allowed');
     const blocked = await probeCsp();
     add(blocked ? 'ok' : 'warn', 'Policy enforced by this browser', blocked ? 'A request to a non-allowed host was blocked' : 'Couldn’t confirm that the browser blocked a test request');
 
@@ -810,7 +822,7 @@ async function startReceiver() {
     const authed = new Set();      // connections that proved they hold the session keys
     const conns = new Set();       // every open connection (authed or not)
     const cs = new WeakMap();      // connection -> handshake state
-    let peer = null, attempts = 0;
+    let peer = null, attempts = 0, retries = 0;
     let pr = null;                 // the current pairing: id, key pair, one-time secret
 
     // Everything received is hidden until you press Show.
@@ -818,7 +830,7 @@ async function startReceiver() {
         title: 'Received from phone', autocopy: true,
         reply: (c, obj) => reply(c, obj),
         secure: (c) => secure(c),
-        accepted: (c) => { authed.add(c); status(); }
+        accepted: () => { }              // only a connection that passed the 'hi' checks is ever trusted
     });
     // Send text and files back to the phone over the same encrypted connection.
     const out = createOutbox({
@@ -854,7 +866,7 @@ async function startReceiver() {
     }
 
     function burnCode() {                     // the pairing code has done its job: remove every trace of it from the page
-        pr.salts = [pr.rs]; pr.done = true;
+        clearTimeout(pr.grace); pr.salts = [pr.rs]; pr.done = true;
         $('link').value = ''; $('qr').innerHTML = '';
         status();
     }
@@ -884,13 +896,18 @@ async function startReceiver() {
             await reply(conn, { k: 'hi' });
             if (!pr.done) {
                 if (st.viaPs) {                   // first use of the pairing code: hand over a reconnect secret
-                    if (!pr.rs) { pr.rs = rnd(16); pr.salts = [pr.rs, pr.ps]; }
+                    if (!pr.rs) {
+                        pr.rs = rnd(16); pr.salts = [pr.rs, pr.ps];
+                        const cur = pr;   // the pairing code stays usable for a short grace period, then it is burned either way
+                        cur.grace = setTimeout(() => { if (pr === cur && !cur.done) burnCode(); }, 60000);
+                    }
                     await reply(conn, { k: 'resume', rs: b64u(pr.rs) });
                 } else if (pr.rs) burnCode();     // the phone already holds the reconnect secret
             }
             status(); return;
         }
         if (m.k === 'rsok') { if (authed.has(conn) && pr.rs && !pr.done) burnCode(); return; }
+        if (!authed.has(conn)) return;        // data only counts from a connection that completed the 'hi' checks
         if (m.k === 'msg' && typeof m.id === 'string' && typeof m.text === 'string') return inbox.text(conn, m);
         if (m.k === 'file') return inbox.fileStart(conn, m);
         if (m.k === 'chunk') return inbox.chunk(conn, m);
@@ -902,7 +919,7 @@ async function startReceiver() {
     // Frames arrive strictly in order. The first is the phone's one-off public key (plain), the rest are sealed.
     async function handle(conn, st, d) {
         if (typeof d !== 'string' || d.length > 120000) throw new Error('bad frame');
-        if (st.sess) return onMsg(conn, await st.sess.open(d));
+        if (st.sess) { const m0 = await st.sess.open(d); st.last = Date.now(); return onMsg(conn, m0); }
         const m = JSON.parse(d);
         if (m && typeof m.h === 'string') {
             if (st.bits) throw new Error('duplicate hello');
@@ -922,7 +939,7 @@ async function startReceiver() {
             } catch (e) { }
         }
         if (!found) throw new Error('not our pair');
-        st.sess = found.s; st.viaPs = found.salt === pr.ps;
+        st.sess = found.s; st.viaPs = found.salt === pr.ps; st.last = Date.now();
         return onMsg(conn, found.msg);
     }
 
@@ -930,14 +947,15 @@ async function startReceiver() {
         if (peer) { try { peer.destroy(); } catch (e) { } }
         const mine = pr;
         const p = peer = new Peer(mine.id, peerOptions());
-        p.on('open', () => { if (peer !== p) return; attempts = 0; setNet('ok', 'Online'); status(); });
+        p.on('open', () => { if (peer !== p) return; attempts = 0; retries = 0; setNet('ok', 'Online'); status(); });
         p.on('connection', (conn) => {
             conns.forEach((x) => {      // forget connections that died without telling us (phone slept or lost signal)
-                if (!x.open && (authed.has(x) || !x.peerConnection || ['failed', 'closed', 'disconnected'].includes(x.peerConnection.connectionState))) { conns.delete(x); authed.delete(x); try { x.close(); } catch (e) { } }
+                if (!x.open && (authed.has(x) || (x.peerConnection && ['failed', 'closed', 'disconnected'].includes(x.peerConnection.connectionState)))) { conns.delete(x); authed.delete(x); try { x.close(); } catch (e) { } }
             });
             if (pr !== mine || conns.size >= 6) { try { conn.close(); } catch (e) { } return; }
             conns.add(conn);
-            const st = { sess: null, bits: null, phonePub: null, viaPs: false, bad: 0 };
+            const st = { sess: null, bits: null, phonePub: null, viaPs: false, bad: 0, last: Date.now() };
+            setTimeout(() => { if (!authed.has(conn)) { try { conn.close(); } catch (e) { } } }, 20000);   // no handshake in 20 s: free the slot
             cs.set(conn, st);
             let chain = Promise.resolve();
             conn.on('data', (d) => {
@@ -968,7 +986,8 @@ async function startReceiver() {
                 else fatal('Handoff is already open in another tab or window on this device. Close it and reload.');
             } else if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
                 setNet('bad', 'Offline');
-                if (p.disconnected && !looping) again();
+                if (p.destroyed) setTimeout(() => { if (peer === p) open(); }, Math.min(2000 * ++retries, 15000));   // never got online (or was dropped): start over
+                else if (p.disconnected && !looping) again();
             }
         });
     }
@@ -982,6 +1001,11 @@ async function startReceiver() {
 
     document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Handoff'; });
     window.addEventListener('online', () => { if (peer && peer.disconnected && !peer.destroyed) { try { peer.reconnect(); } catch (e) { } } });
+    // A phone that has gone silent (screen off, no signal) is dropped, so the page never claims a dead connection is live.
+    setInterval(() => {
+        const now = Date.now();
+        authed.forEach((c) => { const st = cs.get(c); if (st && now - st.last > 75000) { try { c.close(); } catch (e) { } } });
+    }, 10000);
 
     // Leaving the page wipes everything held in memory.
     window.addEventListener('pagehide', () => { inbox.wipe(); out.wipe(); try { if (peer) peer.destroy(); } catch (e) { } });
@@ -1097,7 +1121,7 @@ async function startSender(tx) {
         if (conn) { const old = conn; conn = null; inbox.failConn(old); try { old.close(); } catch (e) { } }
         lost();
         const c = conn = peer.connect(tx.id, { reliable: true });
-        clearTimeout(connTimer); connTimer = setTimeout(() => { if (conn === c && !c.open) relink(); }, 12000);
+        clearTimeout(connTimer); connTimer = setTimeout(() => { if (conn === c && !c.open) relink(); }, 20000);
         let s = null, chain = Promise.resolve();
 
         async function onData(d) {
@@ -1147,7 +1171,7 @@ async function startSender(tx) {
             } catch (e) { return; }
             helloTimer = setTimeout(() => {                            // the PC never answered with the right keys
                 if (conn === c && !e2e) { setHead('Not paired', ''); note('Your PC didn’t accept this pairing. Each pairing code works once. Make a new one on your PC and scan it again.', true); }
-            }, 5000);
+            }, 8000);
         });
         c.on('data', (d) => { chain = chain.then(() => onData(d)).catch(() => { }); });
         c.on('close', () => { if (conn !== c) return; inbox.failConn(c); conn = null; lost(); setHead('Reconnecting…', ''); setNet('bad', 'Reconnecting'); retry(); });
@@ -1156,7 +1180,7 @@ async function startSender(tx) {
     function connect() {
         if (closed) return;
         const p = peer = new Peer(undefined, peerOptions());
-        clearTimeout(openTimer); openTimer = setTimeout(() => { if (peer === p && !p.open) relink(); }, 12000);
+        clearTimeout(openTimer); openTimer = setTimeout(() => { if (peer === p && !p.open) relink(); }, 15000);
         p.on('open', () => { if (peer === p) { clearTimeout(openTimer); dial(); } });
         p.on('disconnected', () => {
             if (peer !== p || p.destroyed) return;
@@ -1228,7 +1252,7 @@ async function startSender(tx) {
     // Heartbeat: notice a link that died silently (screen off, signal lost) and rebuild it.
     setInterval(() => {
         if (closed || !conn || !e2e || !sess) return;
-        if (Date.now() - lastRx > 20000) { relink(); return; }
+        if (!document.hidden && Date.now() - lastRx > 20000) { relink(); return; }   // timers are throttled in the background, so only judge while visible
         sess.send(conn, { k: 'ping' }).catch(() => { });
     }, 5000);
     connect();
