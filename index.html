@@ -101,6 +101,31 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
 
 .bar select { font: inherit; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
 #repair { width: 100%; margin: 0 0 1rem; }
+
+/* status & security panel */
+:root { --warn: #8A5A00; }
+@media (prefers-color-scheme: dark) { :root { --warn: #F2C56B; } }
+.top-r { display: flex; align-items: center; gap: .7rem; }
+.top-r .btn { padding: .3rem .65rem; font-size: .85rem; }
+#scrim { position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 20; }
+.panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(25rem, 100%); z-index: 21; background: var(--paper); border-left: 1px solid var(--line); overflow-y: auto; overscroll-behavior: contain;
+    padding: calc(1rem + env(safe-area-inset-top)) calc(1rem + env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom)) 1rem; transform: translateX(100%); visibility: hidden; }
+.panel.open { transform: none; visibility: visible; }
+@media (prefers-reduced-motion: no-preference) { .panel { transition: transform .2s ease, visibility .2s; } }
+.p-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.p-head h2 { margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; }
+.panel h3 { margin: 1.3rem 0 .5rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.p-sum { margin: .9rem 0 0; padding: .6rem .8rem; border-radius: 8px; border: 1px solid var(--line); font-size: .92rem; font-weight: 600; }
+.p-sum.ok { border-color: var(--ok); color: var(--ok); } .p-sum.warn { border-color: var(--warn); color: var(--warn); } .p-sum.bad { border-color: var(--bad); color: var(--bad); }
+.p-state { margin: 0; display: grid; }
+.p-state div { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.p-state dt { color: var(--muted); } .p-state dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-weight: 600; }
+.p-checks { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .55rem; font-size: .9rem; }
+.p-checks li { display: grid; grid-template-columns: 1.3rem 1fr; }
+.p-checks .m { font-weight: 700; color: var(--muted); }
+.p-checks li.ok .m { color: var(--ok); } .p-checks li.bad .m { color: var(--bad); } .p-checks li.warn .m { color: var(--warn); }
+.p-checks small { display: block; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+#p-verify { width: 100%; }
 </style>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -109,7 +134,10 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
 <main>
     <div class="top">
         <span class="wordmark">Handoff</span>
-        <span class="net"><span id="net-dot" class="dot"></span><span id="net-text">Starting…</span></span>
+        <span class="top-r">
+            <span class="net"><span id="net-dot" class="dot"></span><span id="net-text">Starting…</span></span>
+            <button id="panel-btn" class="btn" type="button" aria-expanded="false" aria-controls="panel">Status</button>
+        </span>
     </div>
 
     <h1 id="headline">Starting…</h1>
@@ -170,6 +198,17 @@ footer .row { display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
         </div>
     </footer>
 </main>
+<div id="scrim" hidden></div>
+<aside id="panel" class="panel" aria-label="Status and security" aria-hidden="true">
+    <div class="p-head"><h2>Status &amp; security</h2><button id="panel-close" class="btn" type="button">Close</button></div>
+    <div id="p-sum" class="p-sum" role="status" aria-live="polite">Not checked yet</div>
+    <h3>Current state</h3>
+    <dl id="p-state" class="p-state"></dl>
+    <h3>Security measures</h3>
+    <ul id="p-checks" class="p-checks"></ul>
+    <button id="p-verify" class="btn primary" type="button">Verify again</button>
+    <p id="p-time" class="hint"></p>
+</aside>
 <script>
 (() => {
 'use strict';
@@ -603,6 +642,166 @@ function createOutbox(o) {
     };
 }
 
+// ---------------------------------------------------------------- status & security panel
+let panelSource = null;
+const setPanelSource = (src) => { panelSource = src; };
+
+// Tries to reach a host the policy doesn't allow. If the browser reports a policy violation, the policy really is enforced.
+function probeCsp() {
+    return new Promise((resolve) => {
+        let hit = false;
+        const on = () => { hit = true; };
+        document.addEventListener('securitypolicyviolation', on);
+        const done = () => setTimeout(() => { document.removeEventListener('securitypolicyviolation', on); resolve(hit); }, 200);
+        try { fetch('https://csp-probe.invalid/', { mode: 'no-cors', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' }).then(done, done); } catch (e) { done(); }
+    });
+}
+
+// Runs real frames through two throw-away sessions and tries to break them.
+async function cryptoSelfTest() {
+    const k1 = await aesKey(rnd(32)), k2 = await aesKey(rnd(32));
+    const a = makeSession(k1, k2, ''), b = makeSession(k2, k1, '');
+    const w = [], tap = { send: (x) => w.push(x) };
+    await a.send(tap, { k: 't', v: 1 }); await a.send(tap, { k: 't', v: 2 });
+    const rejects = async (fn) => { try { await fn(); return false; } catch (e) { return true; } };
+    const forged = JSON.parse(w[0]); forged.c = (forged.c[0] === 'A' ? 'B' : 'A') + forged.c.slice(1);
+    const tamper = await rejects(() => b.open(JSON.stringify(forged)));     // altered data
+    const skip = await rejects(() => b.open(w[1]));                         // out of order
+    const first = await b.open(w[0]);
+    const replay = await rejects(() => b.open(w[0]));                       // replayed frame
+    const second = await b.open(w[1]);
+    const x = makeSession(k2, k1, ''), y = makeSession(k2, k1, ''), mine = [];
+    await x.send({ send: (v) => mine.push(v) }, { k: 't' });
+    const reflect = await rejects(() => y.open(mine[0]));                   // frame sent back at its own sender
+    return first.v === 1 && second.v === 2 && tamper && skip && replay && reflect;
+}
+
+async function storageFound() {
+    const f = [];
+    if (document.cookie) f.push('cookies');
+    try { if (localStorage.length) f.push('local storage'); } catch (e) { }
+    try { if (sessionStorage.length) f.push('session storage'); } catch (e) { }
+    try { if (indexedDB.databases && (await indexedDB.databases()).length) f.push('IndexedDB'); } catch (e) { }
+    try { if (window.caches && (await caches.keys()).length) f.push('cache storage'); } catch (e) { }
+    try { if (navigator.serviceWorker && (await navigator.serviceWorker.getRegistrations()).length) f.push('service worker'); } catch (e) { }
+    return f;
+}
+
+async function runChecks() {
+    const src = panelSource, live = src ? src.live() : { conn: null, peer: null, e2e: false, sas: '' };
+    const list = [];
+    const add = (st, label, detail) => list.push({ s: st, label, detail });
+
+    // 1. The live link (same checks that gate every transfer)
+    let r = null;
+    try { r = await checkLink(live.conn, live.peer, live.e2e, live.sas); } catch (e) { }
+    if (r) r.checks.forEach((c, i) => {
+        const idle = (i === 1 && !live.peer) || ((i === 2 || i === 3) && !live.conn) || (i === 3 && !live.e2e);
+        add(c.ok ? 'ok' : idle ? 'wait' : 'bad', c.label, idle && i !== 3 ? (i === 1 ? 'Not connected to the pairing server yet' : 'No device connected yet') : c.detail);
+    });
+    else add('bad', 'Live link checks', 'Could not run');
+
+    // 2. Encryption really rejects tampering, replays, reordering and reflection
+    let okCrypto = false;
+    try { okCrypto = await cryptoSelfTest(); } catch (e) { }
+    add(okCrypto ? 'ok' : 'bad', 'Encryption self-test', okCrypto ? 'Altered, replayed, reordered and reflected frames are all rejected' : 'Failed: do not send anything sensitive');
+
+    // 3. Private keys can't be pulled out of the browser
+    let sealed = false;
+    try {
+        const pair = await newPair(); sealed = pair.privateKey.extractable === false;
+        try { await crypto.subtle.exportKey('pkcs8', pair.privateKey); sealed = false; } catch (e) { }
+    } catch (e) { }
+    add(sealed ? 'ok' : 'bad', 'Private keys can’t be exported', sealed ? 'Non-extractable, new pair per session and per connection' : 'Key export was possible');
+
+    // 4. Content Security Policy: present, strict, and actually enforced
+    const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]'), csp = meta ? meta.content : '';
+    const miss = ["default-src 'none'", "base-uri 'none'", "form-action 'none'"].filter((x) => !csp.includes(x));
+    const cs = (csp.match(/connect-src ([^;]*)/) || [])[1] || '';
+    const wide = /(^|\s)(\*|https:|wss:|http:|ws:)(\s|$)/.test(cs);
+    add(csp && !miss.length && cs && !wide ? 'ok' : 'bad', 'Strict content policy', csp ? (miss.length ? 'Missing: ' + miss.join(', ') : wide ? 'connect-src is too broad: ' + cs : 'Network access limited to: ' + cs) : 'No policy found');
+    const blocked = await probeCsp();
+    add(blocked ? 'ok' : 'warn', 'Policy enforced by this browser', blocked ? 'A request to a non-allowed host was blocked' : 'Couldn’t confirm that the browser blocked a test request');
+
+    // 5. Where code comes from
+    const scripts = Array.from(document.scripts).filter((x) => x.src);
+    const off = scripts.filter((x) => !x.src.startsWith('https://cdnjs.cloudflare.com/'));
+    add(off.length ? 'bad' : 'ok', 'Scripts only from the trusted host', off.length ? 'Unexpected: ' + off.map((x) => x.src).join(', ') : scripts.length + ' library file' + (scripts.length === 1 ? '' : 's') + ' from cdnjs.cloudflare.com');
+    const noSri = scripts.filter((x) => !x.integrity);
+    add(noSri.length ? 'warn' : 'ok', 'Library integrity hashes (SRI)', noSri.length ? noSri.length + ' of ' + scripts.length + ' libraries load without an integrity hash, so a compromised CDN could alter them' : 'All libraries are hash-checked');
+
+    // 6. Nothing is kept, nothing leaks
+    const found = await storageFound();
+    add(found.length ? 'warn' : 'ok', 'Nothing saved on this device', found.length ? 'Found ' + found.join(', ') + '. Handoff writes none of these; another page on the same site may have' : 'No cookies, storage, caches or service workers');
+    const refOk = (document.querySelector('meta[name="referrer"]') || {}).content === 'no-referrer';
+    add(!location.hash && refOk ? 'ok' : 'bad', 'Pairing secret not left in the address bar', !location.hash ? (refOk ? 'Address bar is clean and no referrer is sent' : 'No referrer policy set') : 'The address bar still holds a hash');
+    let framed = false; try { framed = window.top !== window; } catch (e) { framed = true; }
+    add(framed ? 'warn' : 'ok', 'Page not embedded in another site', framed ? 'This page is inside a frame' : 'Top-level page');
+
+    // 7. Received items stay private
+    const masks = Array.from(document.querySelectorAll('label')).filter((l) => /Hide received items/.test(l.textContent)).map((l) => l.querySelector('input')).filter(Boolean);
+    if (masks.length) add(masks.every((m) => m.checked) ? 'ok' : 'warn', 'Received items hidden until you press Show', masks.every((m) => m.checked) ? 'Hiding is on' : 'Hiding is switched off, so received items are visible on screen');
+    const ttl = document.querySelector('select[aria-label^="Auto-delete"]');
+    if (ttl) add(+ttl.value ? 'ok' : 'warn', 'Received items auto-delete', +ttl.value ? 'After ' + ttl.options[ttl.selectedIndex].text : 'Set to Never: items stay in memory until you delete them or close the page');
+
+    // 8. Role-specific
+    if (src && src.extra) { try { src.extra().forEach((c) => list.push(c)); } catch (e) { } }
+    return { list, route: r && r.route ? r.route.replace(/^Route: /, '') : '' };
+}
+
+function initPanel() {
+    const panel = $('panel'), btn = $('panel-btn'), scrim = $('scrim'), vb = $('p-verify');
+    const MARK = { ok: '✓', bad: '✕', warn: '!', wait: '…' };
+    let route = '', busy = false, open = false, t1 = null, t2 = null;
+
+    function state() {
+        const dl = $('p-state'); dl.innerHTML = '';
+        const rows = (panelSource ? panelSource.rows() : [['State', 'Starting…']]).concat([['Network', navigator.onLine ? 'Online' : 'Offline']]);
+        if (route) rows.push(['Route', route]);
+        rows.forEach(([k, v]) => {
+            const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd');
+            dt.textContent = k; dd.textContent = v; row.append(dt, dd); dl.appendChild(row);
+        });
+    }
+    function paint(res) {
+        const ul = $('p-checks'); ul.innerHTML = '';
+        res.list.forEach((c) => {
+            const li = document.createElement('li'); li.className = c.s;
+            const m = document.createElement('span'); m.className = 'm'; m.textContent = MARK[c.s];
+            const d = document.createElement('div'); d.textContent = c.label;
+            if (c.detail) { const sm = document.createElement('small'); sm.textContent = c.detail; d.appendChild(sm); }
+            li.append(m, d); ul.appendChild(li);
+        });
+        const n = (k) => res.list.filter((c) => c.s === k).length, pl = (x) => x + (x === 1 ? ' check' : ' checks');
+        const sum = $('p-sum');
+        sum.className = 'p-sum ' + (n('bad') ? 'bad' : n('warn') ? 'warn' : 'ok');
+        sum.textContent = n('bad') ? pl(n('bad')) + ' failed. Transfers may be blocked.'
+            : n('warn') ? 'No failures, ' + n('warn') + (n('warn') === 1 ? ' warning' : ' warnings') + ' to look at.'
+            : n('wait') ? 'No problems. ' + pl(n('wait')) + ' waiting for a device.'
+            : 'All ' + res.list.length + ' checks passed.';
+        $('p-time').textContent = 'Last verified ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    async function verifyAll() {
+        if (busy) return; busy = true; vb.disabled = true; vb.textContent = 'Verifying…';
+        try { const res = await runChecks(); route = res.route; paint(res); state(); }
+        catch (e) { $('p-sum').className = 'p-sum bad'; $('p-sum').textContent = 'Could not run the checks.'; }
+        finally { busy = false; vb.disabled = false; vb.textContent = 'Verify again'; }
+    }
+    function show(on) {
+        open = on;
+        panel.classList.toggle('open', on); panel.setAttribute('aria-hidden', on ? 'false' : 'true');
+        scrim.hidden = !on; btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+        clearInterval(t1); clearInterval(t2);
+        if (on) { state(); verifyAll(); t1 = setInterval(state, 2000); t2 = setInterval(verifyAll, 15000); $('panel-close').focus(); }
+        else btn.focus();
+    }
+    btn.onclick = () => show(!open);
+    $('panel-close').onclick = () => show(false);
+    scrim.onclick = () => show(false);
+    vb.onclick = verifyAll;
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && open) show(false); });
+}
+
 // ---------------------------------------------------------------- receiver (PC)
 async function startReceiver() {
     $('rx').hidden = false; $('tx').hidden = true;
@@ -794,6 +993,29 @@ async function startReceiver() {
         if (authed.size && e.dataTransfer && e.dataTransfer.files.length) out.addFiles(e.dataTransfer.files);
     });
 
+    setPanelSource({
+        live() {
+            const c = Array.from(authed).pop(), st = c && cs.get(c);
+            return { conn: c && c.open ? c : null, peer, e2e: !!(st && st.sess), sas: st && st.sess ? st.sess.sas : '' };
+        },
+        rows() {
+            const c = Array.from(authed).pop(), st = c && cs.get(c);
+            return [
+                ['This device', 'PC (receiver)'],
+                ['Pairing server', peer && peer.open ? 'Online' : peer && peer.disconnected ? 'Reconnecting' : 'Starting'],
+                ['Phone', authed.size ? 'Connected' : pr && pr.done ? 'Disconnected' : 'Waiting for scan'],
+                ['Pairing code', !pr ? '–' : pr.done ? 'Used up' : 'Not used yet'],
+                ['Open connections', String(conns.size)],
+                ['Session code', st && st.sess ? st.sess.sas : '–']
+            ];
+        },
+        extra() {
+            if (!pr) return [];
+            if (!pr.done) return [{ s: 'wait', label: 'One-time pairing code used up', detail: 'Not used yet. It burns on the first connection.' }];
+            const gone = !$('link').value && !$('qr').innerHTML;
+            return [{ s: gone ? 'ok' : 'bad', label: 'One-time pairing code used up', detail: gone ? 'Link and QR removed from this page' : 'The code is still visible on this page' }];
+        }
+    });
     await showPairing();
     status(); open();
 }
@@ -980,6 +1202,21 @@ async function startSender(tx) {
         $('tx').hidden = true; $('forget').hidden = true; renderSec(null); note('');
         setHead('Disconnected', 'Nothing is stored on this device. Scan a new pairing code from your PC to connect again.'); setNet('', 'Closed');
     };
+    setPanelSource({
+        live: () => ({ conn: conn && conn.open ? conn : null, peer, e2e, sas: sess ? sess.sas : '' }),
+        rows: () => [
+            ['This device', 'Phone (sender)'],
+            ['Link', closed ? 'Closed' : ready ? 'Secure, ready to send' : e2e ? 'Blocked: a check failed' : conn ? 'Connecting…' : 'Reconnecting…'],
+            ['Pairing server', peer && peer.open ? 'Online' : peer && peer.disconnected ? 'Reconnecting' : peer ? 'Connecting' : 'Offline'],
+            ['Last heard from PC', conn ? Math.max(0, Math.round((Date.now() - lastRx) / 1000)) + ' s ago' : '–'],
+            ['Reconnect attempts', String(retryN)],
+            ['Session code', sess ? sess.sas : '–']
+        ],
+        extra: () => [salt !== tx.salt
+            ? { s: 'ok', label: 'One-time pairing code replaced', detail: 'This phone now reconnects with a secret held only in memory' }
+            : { s: 'wait', label: 'One-time pairing code replaced', detail: 'Waiting for the PC to hand over the reconnect secret' }]
+    });
+
     // Waking the phone, switching back to the tab or regaining signal re-checks the link right away.
     document.addEventListener('visibilitychange', () => { if (!document.hidden) probe(); });
     document.addEventListener('resume', probe);
@@ -999,6 +1236,7 @@ async function startSender(tx) {
 
 // ---------------------------------------------------------------- boot
 async function boot() {
+    initPanel();
     if (!window.crypto || !crypto.subtle) { fatal('Your browser only allows encryption on HTTPS pages (or localhost). Open this page over HTTPS.'); return; }
     if (typeof Peer === 'undefined') { fatal('The connection library didn’t load. Check your network and reload.'); return; }
     // A page restored from the back/forward cache has lost its connection. The phone reconnects with the keys it still holds;
